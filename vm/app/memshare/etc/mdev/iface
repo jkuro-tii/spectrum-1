@@ -33,4 +33,4 @@ foreground {
   }
 }
 
-s6-rc -u change catgirl
+s6-rc -u change memshare

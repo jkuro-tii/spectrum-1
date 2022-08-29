@@ -22,10 +22,6 @@ fdmove -c 2 0
 foreground { clear }
 unexport ?
 
-# Run catgirl, then a login shell to allow for debugging.
-foreground { printf "IRC nick (to join #spectrum): " }
-foreground {
-  backtick -E nick { head -1 }
-  catgirl -h irc.libera.chat -j "#spectrum" -n $nick
-}
+# Run a login shell to allow for debugging.
+foreground { printf "Will run memory sharing program here." }
 exec -l sh
