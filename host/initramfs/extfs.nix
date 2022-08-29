@@ -18,6 +18,12 @@ let
     inherit pkgs;
     # inherit (foot) terminfo;
   };
+
+  appvm-memshare = import ../../vm/app/memshare {
+    inherit pkgs;
+    # inherit (foot) terminfo;
+  };
+
 in
 
 runCommand "ext.ext4" {

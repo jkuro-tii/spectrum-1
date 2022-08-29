@@ -9,14 +9,14 @@ pkgs.pkgsStatic.callPackage (
 
 { lib, stdenvNoCC, runCommand, writeReferencesToFile, buildPackages
 , s6-rc, tar2ext4
-, busybox, cacert, catgirl, execline, kmod, mdevd, s6, s6-linux-init
+, busybox, cacert, execline, kmod, mdevd, s6, s6-linux-init
 }:
 
 let
   inherit (lib) cleanSource cleanSourceWith concatMapStringsSep hasSuffix;
 
   packages = [
-    catgirl execline kmod mdevd s6 s6-linux-init s6-rc
+    execline kmod mdevd s6 s6-linux-init s6-rc
 
     (busybox.override {
       extraConfig = ''
@@ -62,7 +62,7 @@ let
 in
 
 stdenvNoCC.mkDerivation {
-  name = "spectrum-appvm-catgirl";
+  name = "spectrum-appvm-memshare";
 
   src = cleanSourceWith {
     filter = name: _type:
