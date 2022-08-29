@@ -36,6 +36,8 @@ runCommand "ext.ext4" {
   tar -C ${appvm-catgirl} -c data | tar -C svc -x
   chmod +w svc/data
   tar -C ${appvm-lynx} -c data | tar -C svc -x
+  chmod +w svc/data
+  tar -C ${appvm-memshare} -c data | tar -C svc -x
 
   tar -cf ext.tar svc
   tar2ext4 -i ext.tar -o $out
