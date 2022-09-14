@@ -20,10 +20,8 @@ let
 
   foot = pkgsGui.foot.override { allowPgo = false; };
 
-  qemu = pkgs.pkgsMusl.qemu.override { gtkSupport = false; sdlSupport = false; };
-
   packages = [
-    qemu cloud-hypervisor execline jq kmod mdevd s6 s6-linux-init s6-rc socat
+    cloud-hypervisor execline jq kmod mdevd s6 s6-linux-init s6-rc socat
     start-vm
 
     (cryptsetup.override {
