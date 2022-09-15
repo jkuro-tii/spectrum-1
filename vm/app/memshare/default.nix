@@ -39,6 +39,7 @@ let
     ln -s ${kernel}/lib "$out"
     ln -s ${terminfo}/share/terminfo $out/usr/share
     ln -s ${cacert}/etc/ssl $out/usr/share
+    ln -s ${memtest}/memtest $out/usr/bin
   '';
 
   packagesTar = runCommand "packages.tar" {} ''
@@ -61,6 +62,8 @@ let
       AGP = yes;
     };
   };
+
+  memtest = pkgs.callPackage ./memtest/memtest.nix { };
 in
 
 stdenvNoCC.mkDerivation {
@@ -69,6 +72,7 @@ stdenvNoCC.mkDerivation {
   src = cleanSourceWith {
     filter = name: _type:
       name != "${toString ./.}/build" &&
+        name != "${toString ./.}/memtest" &&
       !(hasSuffix ".nix" name);
     src = cleanSource ./.;
   };
