@@ -23,5 +23,5 @@ foreground { clear }
 unexport ?
 
 # Run a login shell to allow for debugging.
-foreground { printf "Will run memory sharing program here." }
+foreground { printf "Runnning shared memory test." }
 exec -l sh
