@@ -44,6 +44,7 @@ let
     ln -s ${concatMapStringsSep " " (p: "${p}/bin/*") packages} $out/usr/bin
     ln -s ${kernel}/lib "$out"
     ln -s ${terminfo}/share/terminfo $out/usr/share
+    ln -s ${memtest}/memtest $out/usr/bin
 
     for pkg in ${dbus} ${connman}; do
         lndir -silent $pkg/share/dbus-1 $out/usr/share/dbus-1
@@ -70,6 +71,8 @@ let
       AGP = yes;
     };
   };
+
+  memtest = pkgs.callPackage ../../app/memshare/memtest/memtest.nix { };
 in
 
 stdenvNoCC.mkDerivation {
