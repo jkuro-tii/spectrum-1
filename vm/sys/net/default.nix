@@ -69,6 +69,8 @@ let
       DRM_BOCHS = yes;
       DRM = yes;
       AGP = yes;
+      ARCH_HAS_PMEM_API = yes;
+      ARCH_HAS_UACCESS_FLUSHCACHE = yes;
     };
   };
 
