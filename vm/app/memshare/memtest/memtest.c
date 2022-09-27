@@ -17,7 +17,7 @@
 
 int pmem_fd = -1; 
 
-volatile struct
+struct
 {
   volatile int ready;
   volatile int start;
@@ -38,13 +38,11 @@ int is_netvm()
 
 void hexdump(void *mem, int size)
 {
-  for(int i; i < size; i++)
+  for(int i = 0; i < size; i++)
   {
     printf("%02x ", *(unsigned char*) (mem + i));
   }
-
   printf("\n");
-
 }
 
 void print_report(double cpu_time_s, double real_time_s, long int data_written, long int data_read)
@@ -59,6 +57,17 @@ void print_report(double cpu_time_s, double real_time_s, long int data_written, 
     (double)(data_read+data_written)/MB/real_time_s);
 }
 
+void flush()
+{
+  int ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
+  if (ioctl_result < 0)
+  {
+    perror("ioctl");
+  }
+}
+#define READY (0x44444444)
+#define START (0x55555555)
+
 void proc_netvm()
 {
   hexdump(vm_control, sizeof(*vm_control));
@@ -66,36 +75,24 @@ void proc_netvm()
   do
   {
     printf("Running on netvm\n");
-
-    // TODO: remove
++
     printf("&vm_control->ready=%p\n", &(vm_control->ready));
     // Wait for start
     printf("Waiting to be started.\n");
-    vm_control->ready = 0xc1a0c1a0;
-    int ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
-    if (ioctl_result < 0)
-    {
-      perror("ioctl");
-    }
     hexdump(vm_control, sizeof(*vm_control));
 
-    while(!vm_control->start) 
+    do
     {
-      ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
-      if (ioctl_result < 0)
-      {
-        perror("ioctl");
-      }
-      vm_control->ready = 0xc1a0c1a0;
+      vm_control->ready = READY;
+      flush();
       usleep(10000);
-    } 
-    vm_control->ready = 0xc1a0c1a0;
+    } while(!(volatile)vm_control->start) ;
+
+    vm_control->start = 0;
+    flush();
 
     printf("Start received.\n");
     hexdump(vm_control, sizeof(*vm_control));    
-    // TODO
-    // vm_control->ready = 0; 
-    // vm_control->start = 0;
 
     printf("Executing a task.\n");
     usleep(3000000); // 3 secs
@@ -103,11 +100,7 @@ void proc_netvm()
     printf("Task finished.\n\n");
     vm_control->ready = 1;
     vm_control->done = 1;
-    ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
-    if (ioctl_result < 0)
-    {
-      perror("ioctl");
-    }
+    flush();
   } while(!vm_control->shutdown);
 }
 
@@ -117,50 +110,37 @@ void proc_test()
   {
     printf("Running on the other VM\n");
     hexdump(vm_control, sizeof(*vm_control));
-    //memset(vm_control, 0, sizeof(*vm_control));
+    memset(vm_control, 0, sizeof(*vm_control));
     printf("&vm_control->ready=%p vm_control->ready=%x\n", &(vm_control->ready), vm_control->ready);
-    
+    flush();
+
     // Wait for the peer VM be ready
     printf("Waiting for the peer to be ready.\n");
-    while(!(volatile)vm_control->ready) 
+    do
     {
       usleep(1000);
-      int ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
-      if (ioctl_result < 0)
-      {
-        perror("ioctl");
-      }
-    } 
+      flush();    
+    } while(!vm_control->ready);
+    vm_control->ready = 0;
+    flush();
 
     // Start the partner VM
     printf("Starting the peer.\n");
     vm_control->done = 0;
-    vm_control->start = 0x1316191c;
-    int ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
-    if (ioctl_result < 0)
-    {
-      perror("ioctl");
-    }
+    vm_control->start = START;
+    flush();
 
     printf("Waiting for completion.\n");
     hexdump(vm_control, sizeof(*vm_control));
     // Wait for completion
-    while(!vm_control->done) 
+    do 
     {
+      vm_control->start = START;
       usleep(10000); // 10ms
-    int ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
-    if (ioctl_result < 0)
-    {
-      perror("ioctl");
-    }
-    } 
+      flush();
+    } while(!vm_control->done);
 
     printf("Done.\n\n");
-    ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
-    if (ioctl_result < 0)
-    {
-      perror("ioctl");
-    }
   } while(!vm_control->shutdown);
 }
 

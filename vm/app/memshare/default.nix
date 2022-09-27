@@ -60,6 +60,7 @@ let
       DRM_BOCHS = yes;
       DRM = yes;
       AGP = yes;
+      ARM64_PMEM = yes;
     };
   };
 
