@@ -72,12 +72,20 @@ void proc_netvm()
     // Wait for start
     printf("Waiting to be started.\n");
     vm_control->ready = 0xc1a0c1a0;
-    ioctl(pmem_fd, BLKFLSBUF);
+    int ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
+    if (ioctl_result < 0)
+    {
+      perror("ioctl");
+    }
     hexdump(vm_control, sizeof(*vm_control));
 
     while(!vm_control->start) 
     {
-      ioctl(pmem_fd, BLKFLSBUF);
+      ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
+      if (ioctl_result < 0)
+      {
+        perror("ioctl");
+      }
       vm_control->ready = 0xc1a0c1a0;
       usleep(10000);
     } 
@@ -95,7 +103,11 @@ void proc_netvm()
     printf("Task finished.\n\n");
     vm_control->ready = 1;
     vm_control->done = 1;
-    ioctl(pmem_fd, BLKFLSBUF);
+    ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
+    if (ioctl_result < 0)
+    {
+      perror("ioctl");
+    }
   } while(!vm_control->shutdown);
 }
 
@@ -113,14 +125,22 @@ void proc_test()
     while(!(volatile)vm_control->ready) 
     {
       usleep(1000);
-      ioctl(pmem_fd, BLKFLSBUF);
+      int ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
+      if (ioctl_result < 0)
+      {
+        perror("ioctl");
+      }
     } 
 
     // Start the partner VM
     printf("Starting the peer.\n");
     vm_control->done = 0;
     vm_control->start = 0x1316191c;
-    ioctl(pmem_fd, BLKFLSBUF);
+    int ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
+    if (ioctl_result < 0)
+    {
+      perror("ioctl");
+    }
 
     printf("Waiting for completion.\n");
     hexdump(vm_control, sizeof(*vm_control));
@@ -128,11 +148,19 @@ void proc_test()
     while(!vm_control->done) 
     {
       usleep(10000); // 10ms
-      ioctl(pmem_fd, BLKFLSBUF);
+    int ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
+    if (ioctl_result < 0)
+    {
+      perror("ioctl");
+    }
     } 
 
     printf("Done.\n\n");
-    ioctl(pmem_fd, BLKFLSBUF);
+    ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
+    if (ioctl_result < 0)
+    {
+      perror("ioctl");
+    }
   } while(!vm_control->shutdown);
 }
 
