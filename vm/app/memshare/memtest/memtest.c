@@ -8,53 +8,43 @@
 #include <time.h>
 #include <sys/times.h>
 #include <sys/time.h>
-
-// int usleep(useconds_t usec);
-
-// clock_t times(struct tms *buf); // get process time
-// time_t time(time_t *tloc);
-
-// clock_t clock(void); // CPU time
-// time_t time(time_t *tloc); // time - get time in seconds
-
-// void handle() {
-//     times(&time_end);
-// }
-
-// int main(int argc, char *argv[]) {
-//     signal(SIGINT, handle);
+#include <string.h>
 
 #define PMEM_DEVICE "/dev/pmem0"
 #define TEST_TYPE long int
 #define TEST_TYPE_LENGTH sizeof(TEST_TYPE)
 #define MB (1048576)
 
-/* As the same application is working on a VM and the netvm machine,
- * lets start the application on netvm as the second one.
- */
+int pmem_fd = -1; 
 
-struct {
-  long int netvm_ready;
-  long int start;
-  long int netvm_done;
-} *comm;
-
+volatile struct
+{
+  volatile int ready;
+  volatile int start;
+  volatile int done;
+  volatile int shutdown;
+} *vm_control;
 
 int is_netvm()
 {
-  FILE* test_file = fopen("/etc/nftables.conf", "r"); // This is exists only on the netvm virtual machine
+  FILE* test_file = fopen("/etc/nftables.conf", "r"); // This file exists only on the netvm virtual machine
 
   int first = test_file != NULL;
   if (first)
     fclose(test_file);
-  
-  printf("Running on ");
-  if (first)
-    printf("netvm\n");
-  else
-    printf("other VM\n");
 
   return first;
+}
+
+void hexdump(void *mem, int size)
+{
+  for(int i; i < size; i++)
+  {
+    printf("%02x ", *(unsigned char*) (mem + i));
+  }
+
+  printf("\n");
+
 }
 
 void print_report(double cpu_time_s, double real_time_s, long int data_written, long int data_read)
@@ -71,48 +61,87 @@ void print_report(double cpu_time_s, double real_time_s, long int data_written, 
 
 void proc_netvm()
 {
-  // READY = 0 
-  // START = 0
-  // DONE = 0
-  
-  // Wait for start
-  // READY = 1
-  // ?START
+  hexdump(vm_control, sizeof(*vm_control));
+  //memset(vm_control, 0, sizeof(*vm_control));
+  do
+  {
+    printf("Running on netvm\n");
 
-  // START = 0
-  // READY = 0
+    // TODO: remove
+    printf("&vm_control->ready=%p\n", &(vm_control->ready));
+    // Wait for start
+    printf("Waiting to be started.\n");
+    vm_control->ready = 0xc1a0c1a0;
+    ioctl(pmem_fd, BLKFLSBUF);
+    hexdump(vm_control, sizeof(*vm_control));
 
-  // execute
+    while(!vm_control->start) 
+    {
+      ioctl(pmem_fd, BLKFLSBUF);
+      vm_control->ready = 0xc1a0c1a0;
+      usleep(10000);
+    } 
+    vm_control->ready = 0xc1a0c1a0;
 
-  // DONE = 1
+    printf("Start received.\n");
+    hexdump(vm_control, sizeof(*vm_control));    
+    // TODO
+    // vm_control->ready = 0; 
+    // vm_control->start = 0;
 
-  // Loop Wait for Start
+    printf("Executing a task.\n");
+    usleep(3000000); // 3 secs
+
+    printf("Task finished.\n\n");
+    vm_control->ready = 1;
+    vm_control->done = 1;
+    ioctl(pmem_fd, BLKFLSBUF);
+  } while(!vm_control->shutdown);
 }
 
 void proc_test()
 {
-  // START = 0 DONE = 0
+  do
+  {
+    printf("Running on the other VM\n");
+    hexdump(vm_control, sizeof(*vm_control));
+    //memset(vm_control, 0, sizeof(*vm_control));
+    printf("&vm_control->ready=%p vm_control->ready=%x\n", &(vm_control->ready), vm_control->ready);
+    
+    // Wait for the peer VM be ready
+    printf("Waiting for the peer to be ready.\n");
+    while(!(volatile)vm_control->ready) 
+    {
+      usleep(1000);
+      ioctl(pmem_fd, BLKFLSBUF);
+    } 
 
-  // Start
-  // ?READY
-  // DONE = 0
-  // START = 1
+    // Start the partner VM
+    printf("Starting the peer.\n");
+    vm_control->done = 0;
+    vm_control->start = 0x1316191c;
+    ioctl(pmem_fd, BLKFLSBUF);
 
-  // Wait for completion
-  // ?DONE
-  // DONE = 0
+    printf("Waiting for completion.\n");
+    hexdump(vm_control, sizeof(*vm_control));
+    // Wait for completion
+    while(!vm_control->done) 
+    {
+      usleep(10000); // 10ms
+      ioctl(pmem_fd, BLKFLSBUF);
+    } 
 
-  // Verify
-
-  // Loop Start
-
+    printf("Done.\n\n");
+    ioctl(pmem_fd, BLKFLSBUF);
+  } while(!vm_control->shutdown);
 }
 
 
-void memtest(void *pmem_ptr, long int size)
+int memtest(void *pmem_ptr, long int size, int verify)
 {
   long int read_counter = 0, write_counter = 0;
-  
+  int ret_val = 0;
+
   double cpu_time_ms = 0.0;
   clock_t cpu_time_start = clock();
 
@@ -125,73 +154,100 @@ void memtest(void *pmem_ptr, long int size)
   unsigned TEST_TYPE* pmem_array = (unsigned TEST_TYPE*) pmem_ptr;
   long int pmem_size = size / sizeof(TEST_TYPE);
   unsigned int counter;
-  int base = is_netvm();
 
-  printf("Shared array size: %ld bytes  size=%ld. Mapped at: %p base=%d\n", pmem_size, size, pmem_ptr, base);
+  printf("Shared array size: %ld bytes  size=%ld. Mapped at: %p is netvm=%d\n", pmem_size, size, pmem_ptr, is_netvm());
 
-  do 
+  if(!verify) 
   {
     for(counter = 0; counter < 5000; counter++)
     {
-      for(unsigned int n = base; n < pmem_size; n++) // TODO +2 instead of +1 
+      for(unsigned int n = 0; n < pmem_size; n++) // TODO +2 instead of +1 
       {
         write_counter++;
         pmem_array[n] = counter;
-        (volatile void) pmem_array[n];
       }
     }
+    ret_val = 0;
+  } 
+  else
+  {
+    ret_val = 0;
+    for(counter = 0; counter < 50000; counter++)
+    {
+      for(unsigned int n = 0; n < pmem_size; n++) // TODO +2 instead of +1 
+      {        
+        if (pmem_array[n] != counter) 
+        {
+          printf("memtest error at addr %p\n", &pmem_array[n]);
+          ret_val = 1;
+          goto exit;
+        }
+        read_counter++;
+      }
+    }
+  }
 
+  exit:
     gettimeofday(&current_time, NULL);
     cpu_time_ms = (double)(clock() - cpu_time_start) / CLOCKS_PER_SEC * 1000;
     current_time_ms = 1000.0*current_time.tv_sec + (double)current_time.tv_usec/1000.0 - time_start_msec;
     print_report(cpu_time_ms, current_time_ms, write_counter*sizeof(TEST_TYPE), read_counter*sizeof(TEST_TYPE));
-  
-  } while(1);
-
-  return;
+  return ret_val;
 }
 
 int main()
 {
-  void *pmem_ptr;
-  int pmem_fd = -1; 
-  long int pmem_size = 0;
+  void *pmem_ptr, *test_pmem;
+  long int mem_size = 0, test_mem_size = 0;
 
   /* Open shared memory */
   pmem_fd = open(PMEM_DEVICE, O_RDWR);
   if (pmem_fd < 0)
   {
     perror(PMEM_DEVICE);
-    goto err;
+    goto exit_error;
   }  
 
   /* Get memory size */
-  int res = ioctl(pmem_fd, BLKGETSIZE64, &pmem_size);
-  printf("pmem_size=%ld\n", pmem_size);
+  int res = ioctl(pmem_fd, BLKGETSIZE64, &mem_size);
+  printf("pmem_size=%ld\n", mem_size);
   if (res < 0)
   {
     perror(PMEM_DEVICE);
-    goto err;
+    goto exit_error;
   }
 
-  if (pmem_size == 0)
+  if (mem_size == 0)
   {
     printf("No shared memory detected.\n");
-    goto err_close; 
+    goto exit_close; 
   }
 
-  pmem_ptr = mmap(NULL, pmem_size, PROT_READ|PROT_WRITE, MAP_SHARED, pmem_fd, 0);
-  printf("pmem_size=%ld pmem=%p\n", pmem_size, pmem_ptr);
+  pmem_ptr = mmap(NULL, mem_size, PROT_READ|PROT_WRITE, MAP_SHARED, pmem_fd, 0);
+  printf("pmem_size=%ld pmem=%p\n", mem_size, pmem_ptr);
 
   if (pmem_ptr != NULL)
   {
-    memtest(pmem_ptr, pmem_size);
+    vm_control = pmem_ptr;
+    test_pmem = pmem_ptr + sizeof(*vm_control);
+    test_mem_size = mem_size - sizeof(*vm_control);
 
-    res = munmap(pmem_ptr, pmem_size);
+    if (is_netvm())
+    {
+      proc_netvm();
+    }
+    else
+    {
+      proc_test();
+    }
+
+    // memtest(test_pmem, test_mem_size, 0);
+
+    res = munmap(pmem_ptr, mem_size);
     if (res < 0)
     {
       perror(PMEM_DEVICE);
-      goto err;
+      goto exit_error;
     }
   }
   else
@@ -202,10 +258,8 @@ int main()
   close(pmem_fd);
   return 0;
 
-err:
-
-err_close:
+exit_close:
   close(pmem_fd);
-err:
+exit_error:
   return 1;
 }
