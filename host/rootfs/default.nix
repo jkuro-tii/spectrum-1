@@ -58,9 +58,6 @@ let
       VIRTIO_PCI = yes;
       VIRTIO_BLK = yes;
       EXT4_FS = yes;
-      ARCH_HAS_PMEM_API = yes;
-      PMEM_API = yes;
-      ARCH_HAS_UACCESS_FLUSHCACHE = yes;
     };
   };
 
