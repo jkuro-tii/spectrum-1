@@ -50,8 +50,8 @@ let
 
   kernel = pkgs.linux_latest.override {
     structuredExtraConfig = with lib.kernel; {
-      EFI_STUB=yes;
-      EFI=yes;
+      EFI_STUB = yes;
+      EFI = yes;
       VIRTIO = yes;
       VIRTIO_PCI = yes;
       VIRTIO_BLK = yes;
@@ -61,6 +61,8 @@ let
       DRM = yes;
       AGP = yes;
       ARM64_PMEM = yes;
+      HAS_PMEM_API = yes;
+      LIBNVDIMM = yes;
     };
   };
 
