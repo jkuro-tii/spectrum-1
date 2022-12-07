@@ -1,0 +1,407 @@
+diff -ruN linux-5.18.orig/drivers/nvdimm/core.c linux-5.18/drivers/nvdimm/core.c
+--- linux-5.18.orig/drivers/nvdimm/core.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/nvdimm/core.c	2022-12-06 12:06:33.590150505 +0400
+@@ -17,6 +17,8 @@
+ #include "nd-core.h"
+ #include "nd.h"
+ 
++#define HERE printk("At %s: %s:%s", __FUNCTION__, __FILE__, __LINE__);
++
+ LIST_HEAD(nvdimm_bus_list);
+ DEFINE_MUTEX(nvdimm_bus_list_mutex);
+ 
+@@ -69,6 +71,7 @@
+ 	struct nvdimm_bus *nvdimm_bus = walk_to_nvdimm_bus(dev);
+ 	struct nvdimm_map *nvdimm_map;
+ 
++	HERE;
+ 	list_for_each_entry(nvdimm_map, &nvdimm_bus->mapping_list, list)
+ 		if (nvdimm_map->offset == offset)
+ 			return nvdimm_map;
+@@ -81,6 +84,7 @@
+ 	struct nvdimm_bus *nvdimm_bus = walk_to_nvdimm_bus(dev);
+ 	struct nvdimm_map *nvdimm_map;
+ 
++	HERE;
+ 	nvdimm_map = kzalloc(sizeof(*nvdimm_map), GFP_KERNEL);
+ 	if (!nvdimm_map)
+ 		return NULL;
+@@ -99,10 +103,15 @@
+ 	}
+ 
+ 	if (flags)
++	{
+ 		nvdimm_map->mem = memremap(offset, size, flags);
++		printk("nvdimm_map->mem=%p", nvdimm_map->mem);
++	}
+ 	else
++	{
+ 		nvdimm_map->iomem = ioremap(offset, size);
+-
++		printk("nvdimm_map->iomem=%p", nvdimm_map->iomem);
++	}
+ 	if (!nvdimm_map->mem)
+ 		goto err_map;
+ 
+@@ -124,6 +133,7 @@
+ 	struct nvdimm_bus *nvdimm_bus;
+ 	struct nvdimm_map *nvdimm_map;
+ 
++	HERE;
+ 	nvdimm_map = container_of(kref, struct nvdimm_map, kref);
+ 	nvdimm_bus = nvdimm_map->nvdimm_bus;
+ 
+@@ -142,6 +152,7 @@
+ 	struct nvdimm_map *nvdimm_map = data;
+ 	struct nvdimm_bus *nvdimm_bus = nvdimm_map->nvdimm_bus;
+ 
++	HERE;
+ 	nvdimm_bus_lock(&nvdimm_bus->dev);
+ 	kref_put(&nvdimm_map->kref, nvdimm_map_release);
+ 	nvdimm_bus_unlock(&nvdimm_bus->dev);
+@@ -159,6 +170,7 @@
+ {
+ 	struct nvdimm_map *nvdimm_map;
+ 
++	HERE;
+ 	nvdimm_bus_lock(dev);
+ 	nvdimm_map = find_nvdimm_map(dev, offset);
+ 	if (!nvdimm_map)
+@@ -316,6 +328,7 @@
+ 
+ static int flush_namespaces(struct device *dev, void *data)
+ {
++	HERE;
+ 	nd_device_lock(dev);
+ 	nd_device_unlock(dev);
+ 	return 0;
+@@ -323,6 +336,7 @@
+ 
+ static int flush_regions_dimms(struct device *dev, void *data)
+ {
++	HERE;
+ 	nd_device_lock(dev);
+ 	nd_device_unlock(dev);
+ 	device_for_each_child(dev, NULL, flush_namespaces);
+@@ -336,6 +350,7 @@
+ 	struct nvdimm_bus_descriptor *nd_desc = nvdimm_bus->nd_desc;
+ 	int rc;
+ 
++	HERE;
+ 	if (nd_desc->flush_probe) {
+ 		rc = nd_desc->flush_probe(nd_desc);
+ 		if (rc)
+@@ -365,6 +380,7 @@
+ 	struct nvdimm_bus_descriptor *nd_desc = nvdimm_bus->nd_desc;
+ 	enum nvdimm_fwa_capability cap;
+ 
++	HERE;
+ 	if (!nd_desc->fw_ops)
+ 		return -EOPNOTSUPP;
+ 
+diff -ruN linux-5.18.orig/drivers/nvdimm/Makefile linux-5.18/drivers/nvdimm/Makefile
+--- linux-5.18.orig/drivers/nvdimm/Makefile	2022-09-28 15:30:31.693035247 +0400
++++ linux-5.18/drivers/nvdimm/Makefile	2022-11-03 15:02:59.581279300 +0400
+@@ -31,3 +31,5 @@
+ TOOLS := ../../tools
+ TEST_SRC := $(TOOLS)/testing/nvdimm/test
+ obj-$(CONFIG_NVDIMM_TEST_BUILD) += $(TEST_SRC)/iomap.o
++cflags-y := -DDEBUG
++ccflags-y := -DDEBUG
+diff -ruN linux-5.18.orig/drivers/nvdimm/nd_virtio.c linux-5.18/drivers/nvdimm/nd_virtio.c
+--- linux-5.18.orig/drivers/nvdimm/nd_virtio.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/nvdimm/nd_virtio.c	2022-11-03 14:59:28.622381761 +0400
+@@ -100,6 +100,7 @@
+ /* The asynchronous flush callback function */
+ int async_pmem_flush(struct nd_region *nd_region, struct bio *bio)
+ {
++	// printk("async_pmem_flush called!");
+ 	/*
+ 	 * Create child bio for asynchronous flush and chain with
+ 	 * parent bio. Otherwise directly call nd_region flush.
+@@ -107,7 +108,7 @@
+ 	if (bio && bio->bi_iter.bi_sector != -1) {
+ 		struct bio *child = bio_alloc(bio->bi_bdev, 0, REQ_PREFLUSH,
+ 					      GFP_ATOMIC);
+-
++		//printk("async_pmem_flush: executing bio...");
+ 		if (!child)
+ 			return -ENOMEM;
+ 		bio_clone_blkg_association(child, bio);
+@@ -116,7 +117,9 @@
+ 		submit_bio(child);
+ 		return 0;
+ 	}
+-	if (virtio_pmem_flush(nd_region))
++	int res = virtio_pmem_flush(nd_region);
++	// printk("async_pmem_flush: virtio_pmem_flush return: %d", res);
++	if (res)
+ 		return -EIO;
+ 
+ 	return 0;
+diff -ruN linux-5.18.orig/drivers/nvdimm/pmem.c linux-5.18/drivers/nvdimm/pmem.c
+--- linux-5.18.orig/drivers/nvdimm/pmem.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/nvdimm/pmem.c	2022-10-27 16:12:00.472124006 +0400
+@@ -31,6 +31,8 @@
+ #include "pfn.h"
+ #include "nd.h"
+ 
++// #define DBG
++
+ static struct device *to_dev(struct pmem_device *pmem)
+ {
+ 	/*
+@@ -104,6 +106,9 @@
+ 	unsigned int chunk;
+ 	void *mem;
+ 
++#ifdef DBG
++	printk("write_pmem\n");
++#endif
+ 	while (len) {
+ 		mem = kmap_atomic(page);
+ 		chunk = min_t(unsigned int, len, PAGE_SIZE - off);
+@@ -123,6 +128,7 @@
+ 	unsigned long rem;
+ 	void *mem;
+ 
++	// printk("read_pmem\n");
+ 	while (len) {
+ 		mem = kmap_atomic(page);
+ 		chunk = min_t(unsigned int, len, PAGE_SIZE - off);
+@@ -163,6 +169,9 @@
+ 	phys_addr_t pmem_off = sector * 512 + pmem->data_offset;
+ 	void *pmem_addr = pmem->virt_addr + pmem_off;
+ 
++	#ifdef DBG
++	printk("pmem_do_write\n");
++	#endif
+ 	if (unlikely(is_bad_pmem(&pmem->bb, sector, len)))
+ 		bad_pmem = true;
+ 
+@@ -201,9 +210,22 @@
+ 	struct pmem_device *pmem = bio->bi_bdev->bd_disk->private_data;
+ 	struct nd_region *nd_region = to_region(pmem);
+ 
++	#ifdef DBG
++	printk("pmem_submit_bio\n");
++	#endif
+ 	if (bio->bi_opf & REQ_PREFLUSH)
++	{
++		#ifdef DBG
++		printk("pmem_submit_bio: flush\n");
++		#endif
+ 		ret = nvdimm_flush(nd_region, bio);
+-
++	}
++	else
++	{
++		#ifdef DBG
++		printk("pmem_submit_bio: no flush!\n");
++		#endif
++	}
+ 	do_acct = blk_queue_io_stat(bio->bi_bdev->bd_disk->queue);
+ 	if (do_acct)
+ 		start = bio_start_io_acct(bio);
+@@ -237,6 +259,7 @@
+ 	struct pmem_device *pmem = bdev->bd_disk->private_data;
+ 	blk_status_t rc;
+ 
++	// printk("pmem_rw_page\n");
+ 	if (op_is_write(op))
+ 		rc = pmem_do_write(pmem, page, 0, sector, thp_size(page));
+ 	else
+@@ -321,6 +344,9 @@
+ 	bool write_cache;
+ 	int rc;
+ 
++	#ifdef DBG
++	printk("write_cache_store\n");
++	#endif
+ 	rc = strtobool(buf, &write_cache);
+ 	if (rc)
+ 		return rc;
+@@ -407,7 +433,15 @@
+ 	pmem->size = resource_size(res);
+ 	fua = nvdimm_has_flush(nd_region);
+ 	if (!IS_ENABLED(CONFIG_ARCH_HAS_UACCESS_FLUSHCACHE) || fua < 0) {
+-		dev_warn(dev, "unable to guarantee persistence of writes\n");
++		if (IS_ENABLED(CONFIG_ARCH_HAS_PMEM_API))
++		{
++			dev_warn(dev, "CONFIG_ARCH_HAS_PMEM_API ENABLED\n");
++		}
++		else
++		{
++			dev_warn(dev, "CONFIG_ARCH_HAS_PMEM_API DISABLED!!!\n");
++		}
++		dev_warn(dev, "unable to guarantee persistence of writes fua=%d\n", fua);
+ 		fua = 0;
+ 	}
+ 
+diff -ruN linux-5.18.orig/drivers/nvdimm/region_devs.c linux-5.18/drivers/nvdimm/region_devs.c
+--- linux-5.18.orig/drivers/nvdimm/region_devs.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/nvdimm/region_devs.c	2022-10-31 15:48:28.408495963 +0400
+@@ -1003,6 +1003,8 @@
+ 		nd_region->mapping[i].nvdimm = nvdimm;
+ 		nd_region->mapping[i].start = mapping->start;
+ 		nd_region->mapping[i].size = mapping->size;
++		printk("nd_region->mapping[i].start=%p size=%llx", nd_region->mapping[i].start,
++			nd_region->mapping[i].size);
+ 		nd_region->mapping[i].position = mapping->position;
+ 		INIT_LIST_HEAD(&nd_region->mapping[i].labels);
+ 		mutex_init(&nd_region->mapping[i].lock);
+@@ -1069,10 +1071,16 @@
+ 	int rc = 0;
+ 
+ 	if (!nd_region->flush)
++	{
+ 		rc = generic_nvdimm_flush(nd_region);
++		printk("nvdimm_flush1\n");
++	}
+ 	else {
+ 		if (nd_region->flush(nd_region, bio))
++		{
+ 			rc = -EIO;
++			printk("nvdimm_flush2\n");
++		}
+ 	}
+ 
+ 	return rc;
+diff -ruN linux-5.18.orig/drivers/nvdimm/virtio_pmem.c linux-5.18/drivers/nvdimm/virtio_pmem.c
+--- linux-5.18.orig/drivers/nvdimm/virtio_pmem.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/nvdimm/virtio_pmem.c	2022-12-07 08:49:11.074569556 +0400
+@@ -8,12 +8,16 @@
+  */
+ #include "virtio_pmem.h"
+ #include "nd.h"
++#include <linux/major.h>
++#include <linux/ioport.h>
+ 
+ static struct virtio_device_id id_table[] = {
+ 	{ VIRTIO_ID_PMEM, VIRTIO_DEV_ANY_ID },
+ 	{ 0 },
+ };
+ 
++static struct virtio_pmem *vpmem = NULL;
++
+  /* Initialize virt queue */
+ static int init_vq(struct virtio_pmem *vpmem)
+ {
+@@ -29,12 +33,77 @@
+ 	return 0;
+ };
+ 
++static int open_mem(struct inode *inode, struct file *filp)
++{
++	#if 0
++	int rc;
++
++	if (!capable(CAP_SYS_RAWIO))
++		return -EPERM;
++
++	rc = security_locked_down(LOCKDOWN_DEV_MEM);
++	if (rc)
++		return rc;
++
++	if (iminor(inode) != DEVMEM_MINOR)
++		return 0;
++	#endif
++
++	/*
++	 * Use a unified address space to have a single point to manage
++	 * revocations when drivers want to take over a /dev/mem mapped
++	 * range.
++	 */
++	// filp->f_mapping = iomem_get_mapping();
++	pr_info("%s", __FUNCTION__);
++	printk("vpmem->start=0x%llx vpmem->size=0x%llx", vpmem->start, vpmem->size);
++	return 0;
++}
++
++static int mmap_mem(struct file *file, struct vm_area_struct *vma)
++{
++	pr_info("JK: %s", __FUNCTION__);
++	printk("vpmem->start=0x%llx vpmem->size=0x%llx", vpmem->start, vpmem->size);
++
++	// vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_pgoff,
++	// 					 vpmem->size,
++	// 					 vma->vm_page_prot);
++
++	int ret;
++	unsigned long pfn;
++	pfn = vpmem->start >> PAGE_SHIFT;
++	ret = remap_pfn_range(vma, vma->vm_start, pfn, vpmem->size, vma->vm_page_prot);
++	if (ret < 0) 
++	{
++		pr_err("could not map the address area\n");
++		return -EIO;
++	}
++
++	return 0;
++}
++
++static const struct file_operations __maybe_unused mem_fops = {
++#if 0
++	.llseek		= memory_lseek,
++	.read		= read_mem,
++	.write		= write_mem,
++#endif
++	.mmap		= mmap_mem,
++	.open		= open_mem,
++#if 0
++#ifndef CONFIG_MMU
++	.get_unmapped_area = get_unmapped_area_mem,
++	.mmap_capabilities = memory_mmap_capabilities,
++#endif
++#endif
++};
++
+ static int virtio_pmem_probe(struct virtio_device *vdev)
+ {
+ 	struct nd_region_desc ndr_desc = {};
+ 	int nid = dev_to_node(&vdev->dev);
+ 	struct nd_region *nd_region;
+-	struct virtio_pmem *vpmem;
++//	struct virtio_pmem *vpmem;
+ 	struct resource res;
+ 	int err = 0;
+ 
+@@ -50,6 +119,7 @@
+ 		goto out_err;
+ 	}
+ 
++	//dump_stack();
+ 	vpmem->vdev = vdev;
+ 	vdev->priv = vpmem;
+ 	err = init_vq(vpmem);
+@@ -65,6 +135,8 @@
+ 
+ 	res.start = vpmem->start;
+ 	res.end   = vpmem->start + vpmem->size - 1;
++	printk("vpmem->start=0x%llx vpmem->size=0x%llx res.end=0x%llx", vpmem->start, vpmem->size, res.end);
++	#if 1
+ 	vpmem->nd_desc.provider_name = "virtio-pmem";
+ 	vpmem->nd_desc.module = THIS_MODULE;
+ 
+@@ -90,6 +162,13 @@
+ 		goto out_nd;
+ 	}
+ 	nd_region->provider_data = dev_to_virtio(nd_region->dev.parent->parent);
++	#endif
++
++	/* TODO: jarekk: PHONE_MAJOR replace with other one*/
++	if (register_chrdev(PHONE_MAJOR, "sharedmem", &mem_fops))
++		printk("unable to get major %d for sharedmem devs\n", PHONE_MAJOR);
++
++
+ 	return 0;
+ out_nd:
+ 	nvdimm_bus_unregister(vpmem->nvdimm_bus);
+@@ -103,6 +182,7 @@
+ {
+ 	struct nvdimm_bus *nvdimm_bus = dev_get_drvdata(&vdev->dev);
+ 
++	dump_stack();
+ 	nvdimm_bus_unregister(nvdimm_bus);
+ 	vdev->config->del_vqs(vdev);
+ 	virtio_reset_device(vdev);
