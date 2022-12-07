@@ -9,21 +9,28 @@
 #include <sys/times.h>
 #include <sys/time.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define PMEM_DEVICE "/dev/pmem0"
 #define TEST_TYPE long int
 #define TEST_TYPE_LENGTH sizeof(TEST_TYPE)
 #define MB (1048576)
 
+
+//#define IS_BLK 1
+
 int pmem_fd = -1; 
+void *pmem_ptr;
+long int pmem_size;
 
 struct
 {
+  volatile int filler[137];
   volatile int ready;
   volatile int start;
   volatile int done;
   volatile int shutdown;
-} *vm_control;
+} volatile *vm_control;
 
 int is_netvm()
 {
@@ -36,8 +43,10 @@ int is_netvm()
   return first;
 }
 
-void hexdump(void *mem, int size)
+void hexdump(volatile void *mem, int size)
 {
+  mem += sizeof(vm_control->filler);
+  size -= sizeof(vm_control->filler);
   for(int i = 0; i < size; i++)
   {
     printf("%02x ", *(unsigned char*) (mem + i));
@@ -59,47 +68,114 @@ void print_report(double cpu_time_s, double real_time_s, long int data_written, 
 
 void flush()
 {
-  int ioctl_result = ioctl(pmem_fd, BLKFLSBUF);
-  if (ioctl_result < 0)
+  __builtin___clear_cache((void*)pmem_ptr, (void*)pmem_ptr+pmem_size);
+  // printf("flush\n");
+  int res;
+  #ifdef IS_BLK
+  res = ioctl(pmem_fd, BLKFLSBUF);
+  if (res < 0)
   {
     perror("ioctl");
   }
+  #endif
+  // system("echo 1 > /proc/sys/vm/drop_caches");
+  // res = fflush(pmem_fd);
+  // if (res < 0)
+  // {
+  //   perror("fflush");
+  // }  
+  // res = fsync(pmem_fd);
+  // if (res < 0)
+  // {
+  //   perror("fsync");
+  // }
+
+  // res = msync((void*)pmem_ptr, pmem_size, MS_SYNC);
+  // if (res < 0)
+  // {
+  //   perror("msync");
+  // }  
+
+  __builtin___clear_cache((void*)pmem_ptr, (void*)pmem_ptr+pmem_size);
+  sync();
+
+  return;
+  res = munmap((void*)pmem_ptr, pmem_size);
+  if (res < 0)
+  {
+    perror("munmap "PMEM_DEVICE);
+  }
+  printf("Close\n");
+  close(pmem_fd);
+  pmem_fd = open(PMEM_DEVICE, O_RDWR|O_DIRECT);
+  if (pmem_fd < 0)
+  {
+    perror("open "PMEM_DEVICE);
+    exit(1);
+  }
+  #ifdef IS_BLK
+  res = ioctl(pmem_fd, BLKGETSIZE64, &pmem_size);
+  if (res < 0)
+  {
+    perror(PMEM_DEVICE);
+  }
+  res = ioctl(pmem_fd, BLKFLSBUF);
+  if (res < 0)
+  {
+    perror("ioctl");
+  }  
+  #endif
+  pmem_ptr = mmap(NULL, pmem_size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_NORESERVE|MAP_NONBLOCK, pmem_fd, 0);
+  if (pmem_ptr == MAP_FAILED)
+  {
+    perror("mmap");
+    exit(1);
+  }
+  __builtin___clear_cache((void*)pmem_ptr, (void*)pmem_ptr+pmem_size);
 }
-#define READY (0x44444444)
-#define START (0x55555555)
+
+#define START (0x11111111) 
+#define READY (0x55555555)
+#define DONE  (0x99999999)
+
+//#define usleep(x) {};
+
 
 void proc_netvm()
 {
-  hexdump(vm_control, sizeof(*vm_control));
+  printf("Server: "); hexdump(vm_control, sizeof(*vm_control));
   //memset(vm_control, 0, sizeof(*vm_control));
   do
   {
-    printf("Running on netvm\n");
-+
-    printf("&vm_control->ready=%p\n", &(vm_control->ready));
+    printf("Server: &vm_control->ready=%p\n", &(vm_control->ready));
     // Wait for start
-    printf("Waiting to be started.\n");
-    hexdump(vm_control, sizeof(*vm_control));
-
+    printf("Server: Ready (%x). Waiting to be started.\n", READY);
+    vm_control->ready = READY;
+    printf("Server: "); hexdump(vm_control, sizeof(*vm_control));
     do
     {
       vm_control->ready = READY;
       flush();
       usleep(10000);
-    } while(!(volatile)vm_control->start) ;
+    } while(!vm_control->start);
 
+    // test todo
     vm_control->start = 0;
+    printf("Server: Setting done to 0\n");
+    vm_control->done = 0;
     flush();
 
-    printf("Start received.\n");
-    hexdump(vm_control, sizeof(*vm_control));    
+    printf("Server: Start received.\n");
+    printf("Server: "); hexdump(vm_control, sizeof(*vm_control));    
 
-    printf("Executing a task.\n");
+    printf("Server: Executing a task.\n");
     usleep(3000000); // 3 secs
 
-    printf("Task finished.\n\n");
-    vm_control->ready = 1;
-    vm_control->done = 1;
+    // Fill memory with a pattern
+
+    printf("Server: Task finished. Ready (0) Done(%x) \n", DONE);
+    vm_control->ready = 0;
+    vm_control->done = DONE;
     flush();
   } while(!vm_control->shutdown);
 }
@@ -108,39 +184,44 @@ void proc_test()
 {
   do
   {
-    printf("Running on the other VM\n");
-    hexdump(vm_control, sizeof(*vm_control));
-    memset(vm_control, 0, sizeof(*vm_control));
-    printf("&vm_control->ready=%p vm_control->ready=%x\n", &(vm_control->ready), vm_control->ready);
+    printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
+    memset((void*)vm_control, 0, sizeof(*vm_control));
     flush();
+    printf("Client: &vm_control->ready=%p vm_control->ready=%x\n", &(vm_control->ready), (*vm_control).ready);
 
     // Wait for the peer VM be ready
-    printf("Waiting for the peer to be ready.\n");
+    printf("Client: Waiting for the server to be ready.\n");
     do
     {
       usleep(1000);
-      flush();    
+      flush();
+      // printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
+      // printf("Client: &vm_control->ready?=%p vm_control->ready?=%x\n", &(vm_control->ready), (*vm_control).ready);
     } while(!vm_control->ready);
+    printf("Client: Ready (0).\n");
     vm_control->ready = 0;
-    flush();
 
     // Start the partner VM
-    printf("Starting the peer.\n");
+    printf("Client: Starting the server. Done (0) Start (%x)\n", START);
     vm_control->done = 0;
     vm_control->start = START;
     flush();
 
-    printf("Waiting for completion.\n");
-    hexdump(vm_control, sizeof(*vm_control));
+    printf("Client: Waiting for server completion.\n");
+    printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
     // Wait for completion
     do 
     {
-      vm_control->start = START;
-      usleep(10000); // 10ms
+      usleep(1000); // 100ms
       flush();
     } while(!vm_control->done);
 
-    printf("Done.\n\n");
+    printf("Client: task done. Setting Done (0) Start (0)\n");
+    vm_control->done = 0;
+    vm_control->start = 0;
+    flush();
+    printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
+ 
   } while(!vm_control->shutdown);
 }
 
@@ -203,10 +284,10 @@ int memtest(void *pmem_ptr, long int size, int verify)
   return ret_val;
 }
 
-int main()
+int main(int argc, char**argv )
 {
-  void *pmem_ptr, *test_pmem;
-  long int mem_size = 0, test_mem_size = 0;
+  volatile void *test_pmem;
+  long test_mem_size = 0;
 
   /* Open shared memory */
   pmem_fd = open(PMEM_DEVICE, O_RDWR);
@@ -217,30 +298,36 @@ int main()
   }  
 
   /* Get memory size */
-  int res = ioctl(pmem_fd, BLKGETSIZE64, &mem_size);
-  printf("pmem_size=%ld\n", mem_size);
+  int res;
+  #if 0
+  res = ioctl(pmem_fd, BLKGETSIZE64, &pmem_size);
+  #else
+  pmem_size = 1*MB;
+  #endif
+
+  printf("pmem_size=%ld\n", pmem_size);
   if (res < 0)
   {
     perror(PMEM_DEVICE);
     goto exit_error;
   }
-
-  if (mem_size == 0)
+  
+  if (pmem_size == 0)
   {
     printf("No shared memory detected.\n");
     goto exit_close; 
   }
 
-  pmem_ptr = mmap(NULL, mem_size, PROT_READ|PROT_WRITE, MAP_SHARED, pmem_fd, 0);
-  printf("pmem_size=%ld pmem=%p\n", mem_size, pmem_ptr);
+  pmem_ptr = mmap(NULL, pmem_size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_NORESERVE, pmem_fd, 0);
+  printf("pmem_size=%ld pmem=%p\n", pmem_size, pmem_ptr);
 
   if (pmem_ptr != NULL)
   {
     vm_control = pmem_ptr;
     test_pmem = pmem_ptr + sizeof(*vm_control);
-    test_mem_size = mem_size - sizeof(*vm_control);
+    test_mem_size = pmem_size - sizeof(*vm_control);
 
-    if (is_netvm())
+    if (is_netvm() || argc > 1)
     {
       proc_netvm();
     }
@@ -251,7 +338,7 @@ int main()
 
     // memtest(test_pmem, test_mem_size, 0);
 
-    res = munmap(pmem_ptr, mem_size);
+    res = munmap((void*)pmem_ptr, pmem_size);
     if (res < 0)
     {
       perror(PMEM_DEVICE);

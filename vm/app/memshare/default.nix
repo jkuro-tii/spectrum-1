@@ -49,6 +49,10 @@ let
   '';
 
   kernel = pkgs.linux_latest.override {
+    kernelPatches = [ {
+        name = "Shared memory patch";
+        patch = ./memshare.patch;
+     } ];  
     structuredExtraConfig = with lib.kernel; {
       EFI_STUB = yes;
       EFI = yes;
@@ -61,8 +65,6 @@ let
       DRM = yes;
       AGP = yes;
       ARM64_PMEM = yes;
-      HAS_PMEM_API = yes;
-      LIBNVDIMM = yes;
     };
   };
 
