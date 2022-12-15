@@ -58,10 +58,11 @@ let
   '';
 
   kernel = pkgs.linux_latest.override {
-     kernelPatches = [ {
-        name = "Shared memory patch";
-        patch = ../../app/memshare/memshare.patch;
-     } ];  
+# TODO: jk: remove!!!
+#      kernelPatches = [ {
+#         name = "Shared memory patch";
+#         patch = ../../app/memshare/memshare.patch;
+#      } ];
     structuredExtraConfig = with lib.kernel; {
       EFI_STUB = yes;
       EFI = yes;
