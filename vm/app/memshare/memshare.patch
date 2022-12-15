@@ -1,3 +1,23 @@
+diff -ruN linux-5.18.orig/drivers/char/mem.c linux-5.18/drivers/char/mem.c
+--- linux-5.18.orig/drivers/char/mem.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/char/mem.c	2022-12-08 13:27:22.921241484 +0400
+@@ -119,7 +119,7 @@
+ 
+ 	if (p != *ppos)
+ 		return 0;
+-
++#if 0
+ 	if (!valid_phys_addr_range(p, count))
+ 		return -EFAULT;
+ 	read = 0;
+@@ -137,6 +137,7 @@
+ 		}
+ 	}
+ #endif
++#endif
+ 
+ 	bounce = kmalloc(PAGE_SIZE, GFP_KERNEL);
+ 	if (!bounce)
 diff -ruN linux-5.18.orig/drivers/nvdimm/core.c linux-5.18/drivers/nvdimm/core.c
 --- linux-5.18.orig/drivers/nvdimm/core.c	2022-05-22 23:52:31.000000000 +0400
 +++ linux-5.18/drivers/nvdimm/core.c	2022-12-06 12:06:33.590150505 +0400
@@ -108,6 +128,29 @@ diff -ruN linux-5.18.orig/drivers/nvdimm/Makefile linux-5.18/drivers/nvdimm/Make
  obj-$(CONFIG_NVDIMM_TEST_BUILD) += $(TEST_SRC)/iomap.o
 +cflags-y := -DDEBUG
 +ccflags-y := -DDEBUG
+diff -ruN linux-5.18.orig/drivers/nvdimm/namespace_devs.c linux-5.18/drivers/nvdimm/namespace_devs.c
+--- linux-5.18.orig/drivers/nvdimm/namespace_devs.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/nvdimm/namespace_devs.c	2022-12-09 09:48:37.858879525 +0400
+@@ -1824,7 +1824,8 @@
+ 		kfree(nspm);
+ 		return NULL;
+ 	}
+-	dev_set_name(dev, "namespace%d.%d", nd_region->id, nspm->id);
++	printk("n1amespace");
++	dev_set_name(dev, "n1amespace%d.%d", nd_region->id, nspm->id);
+ 	nd_namespace_pmem_set_resource(nd_region, nspm, 0);
+ 
+ 	return dev;
+@@ -2199,7 +2200,8 @@
+ 
+ 		if (id < 0)
+ 			break;
+-		dev_set_name(dev, "namespace%d.%d", nd_region->id, id);
++		printk("n2amespace");
++		dev_set_name(dev, "n2amespace%d.%d", nd_region->id, id);
+ 		nd_device_register(dev);
+ 	}
+ 	if (i)
 diff -ruN linux-5.18.orig/drivers/nvdimm/nd_virtio.c linux-5.18/drivers/nvdimm/nd_virtio.c
 --- linux-5.18.orig/drivers/nvdimm/nd_virtio.c	2022-05-22 23:52:31.000000000 +0400
 +++ linux-5.18/drivers/nvdimm/nd_virtio.c	2022-11-03 14:59:28.622381761 +0400
@@ -141,7 +184,7 @@ diff -ruN linux-5.18.orig/drivers/nvdimm/nd_virtio.c linux-5.18/drivers/nvdimm/n
  	return 0;
 diff -ruN linux-5.18.orig/drivers/nvdimm/pmem.c linux-5.18/drivers/nvdimm/pmem.c
 --- linux-5.18.orig/drivers/nvdimm/pmem.c	2022-05-22 23:52:31.000000000 +0400
-+++ linux-5.18/drivers/nvdimm/pmem.c	2022-10-27 16:12:00.472124006 +0400
++++ linux-5.18/drivers/nvdimm/pmem.c	2022-12-13 16:13:57.601143258 +0400
 @@ -31,6 +31,8 @@
  #include "pfn.h"
  #include "nd.h"
@@ -221,7 +264,7 @@ diff -ruN linux-5.18.orig/drivers/nvdimm/pmem.c linux-5.18/drivers/nvdimm/pmem.c
  	rc = strtobool(buf, &write_cache);
  	if (rc)
  		return rc;
-@@ -407,7 +433,15 @@
+@@ -407,10 +433,19 @@
  	pmem->size = resource_size(res);
  	fua = nvdimm_has_flush(nd_region);
  	if (!IS_ENABLED(CONFIG_ARCH_HAS_UACCESS_FLUSHCACHE) || fua < 0) {
@@ -238,6 +281,37 @@ diff -ruN linux-5.18.orig/drivers/nvdimm/pmem.c linux-5.18/drivers/nvdimm/pmem.c
  		fua = 0;
  	}
  
++	printk("%s: res=%pR", __FUNCTION__, res);
+ 	if (!devm_request_mem_region(dev, res->start, resource_size(res),
+ 				dev_name(&ndns->dev))) {
+ 		dev_warn(dev, "could not reserve region %pR\n", res);
+@@ -427,7 +462,9 @@
+ 	pmem->pfn_flags = PFN_DEV;
+ 	if (is_nd_pfn(dev)) {
+ 		pmem->pgmap.type = MEMORY_DEVICE_FS_DAX;
++		dump_stack();
+ 		addr = devm_memremap_pages(dev, &pmem->pgmap);
++		printk("1 aaaddr=%p", addr);
+ 		pfn_sb = nd_pfn->pfn_sb;
+ 		pmem->data_offset = le64_to_cpu(pfn_sb->dataoff);
+ 		pmem->pfn_pad = resource_size(res) -
+@@ -440,12 +477,16 @@
+ 		pmem->pgmap.range.end = res->end;
+ 		pmem->pgmap.nr_range = 1;
+ 		pmem->pgmap.type = MEMORY_DEVICE_FS_DAX;
++		dump_stack();
+ 		addr = devm_memremap_pages(dev, &pmem->pgmap);
++		printk("2 aaaddr=%p", addr);
+ 		pmem->pfn_flags |= PFN_MAP;
+ 		bb_range = pmem->pgmap.range;
+ 	} else {
+ 		addr = devm_memremap(dev, pmem->phys_addr,
+ 				pmem->size, ARCH_MEMREMAP_PMEM);
++		printk("3 aaaddr=%p pmem->phys_addr=%p pmem->size=0x%x", addr, pmem->phys_addr, pmem->size);
++		printk("res->start=%p res->end=%p", res->start, res->end);
+ 		bb_range.start =  res->start;
+ 		bb_range.end = res->end;
+ 	}
 diff -ruN linux-5.18.orig/drivers/nvdimm/region_devs.c linux-5.18/drivers/nvdimm/region_devs.c
 --- linux-5.18.orig/drivers/nvdimm/region_devs.c	2022-05-22 23:52:31.000000000 +0400
 +++ linux-5.18/drivers/nvdimm/region_devs.c	2022-10-31 15:48:28.408495963 +0400
@@ -269,7 +343,7 @@ diff -ruN linux-5.18.orig/drivers/nvdimm/region_devs.c linux-5.18/drivers/nvdimm
  	return rc;
 diff -ruN linux-5.18.orig/drivers/nvdimm/virtio_pmem.c linux-5.18/drivers/nvdimm/virtio_pmem.c
 --- linux-5.18.orig/drivers/nvdimm/virtio_pmem.c	2022-05-22 23:52:31.000000000 +0400
-+++ linux-5.18/drivers/nvdimm/virtio_pmem.c	2022-12-07 08:49:11.074569556 +0400
++++ linux-5.18/drivers/nvdimm/virtio_pmem.c	2022-12-14 14:29:37.930652483 +0400
 @@ -8,12 +8,16 @@
   */
  #include "virtio_pmem.h"
@@ -330,7 +404,7 @@ diff -ruN linux-5.18.orig/drivers/nvdimm/virtio_pmem.c linux-5.18/drivers/nvdimm
 +	int ret;
 +	unsigned long pfn;
 +	pfn = vpmem->start >> PAGE_SHIFT;
-+	ret = remap_pfn_range(vma, vma->vm_start, pfn, vpmem->size, vma->vm_page_prot);
++	ret = io_remap_pfn_range(vma, vma->vm_start, pfn, vpmem->size, vma->vm_page_prot);
 +	if (ret < 0) 
 +	{
 +		pr_err("could not map the address area\n");
@@ -366,11 +440,13 @@ diff -ruN linux-5.18.orig/drivers/nvdimm/virtio_pmem.c linux-5.18/drivers/nvdimm
  	struct resource res;
  	int err = 0;
  
-@@ -50,6 +119,7 @@
+@@ -49,7 +118,8 @@
+ 		err = -ENOMEM;
  		goto out_err;
  	}
- 
-+	//dump_stack();
+-
++	printk("JK: -------------------------------");
++	dump_stack();
  	vpmem->vdev = vdev;
  	vdev->priv = vpmem;
  	err = init_vq(vpmem);
@@ -379,7 +455,7 @@ diff -ruN linux-5.18.orig/drivers/nvdimm/virtio_pmem.c linux-5.18/drivers/nvdimm
  	res.start = vpmem->start;
  	res.end   = vpmem->start + vpmem->size - 1;
 +	printk("vpmem->start=0x%llx vpmem->size=0x%llx res.end=0x%llx", vpmem->start, vpmem->size, res.end);
-+	#if 1
++	#if 0
  	vpmem->nd_desc.provider_name = "virtio-pmem";
  	vpmem->nd_desc.module = THIS_MODULE;
  
@@ -405,3 +481,189 @@ diff -ruN linux-5.18.orig/drivers/nvdimm/virtio_pmem.c linux-5.18/drivers/nvdimm
  	nvdimm_bus_unregister(nvdimm_bus);
  	vdev->config->del_vqs(vdev);
  	virtio_reset_device(vdev);
+diff -ruN linux-5.18.orig/drivers/pci/bus.c linux-5.18/drivers/pci/bus.c
+--- linux-5.18.orig/drivers/pci/bus.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/pci/bus.c	2022-12-12 14:02:49.318299262 +0400
+@@ -198,6 +198,7 @@
+ 		max = avail.end;
+ 
+ 		/* Ok, try it out.. */
++		dump_stack();
+ 		ret = allocate_resource(r, res, size, min_used, max,
+ 					align, alignf, alignf_data);
+ 		if (ret == 0)
+diff -ruN linux-5.18.orig/drivers/pci/pci.c linux-5.18/drivers/pci/pci.c
+--- linux-5.18.orig/drivers/pci/pci.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/pci/pci.c	2022-12-13 13:46:43.067947436 +0400
+@@ -235,12 +235,16 @@
+ 
+ void __iomem *pci_ioremap_bar(struct pci_dev *pdev, int bar)
+ {
++	printk("Device=%04x", pdev->subsystem_device);
++	dump_stack();
+ 	return __pci_ioremap_resource(pdev, bar, false);
+ }
+ EXPORT_SYMBOL_GPL(pci_ioremap_bar);
+ 
+ void __iomem *pci_ioremap_wc_bar(struct pci_dev *pdev, int bar)
+ {
++	printk("Device=%04x", pdev->subsystem_device);
++	dump_stack();
+ 	return __pci_ioremap_resource(pdev, bar, true);
+ }
+ EXPORT_SYMBOL_GPL(pci_ioremap_wc_bar);
+@@ -4327,7 +4331,8 @@
+ 		name = devm_kstrdup(dev, dev_name(dev), GFP_KERNEL);
+ 	if (!name)
+ 		return IOMEM_ERR_PTR(-ENOMEM);
+-
++	dump_stack();
++	printk("devm_pci_remap_cfg_resource: ---- start=%p size=%x name=%s", res->start, size, name);
+ 	if (!devm_request_mem_region(dev, res->start, size, name)) {
+ 		dev_err(dev, "can't request region for resource %pR\n", res);
+ 		return IOMEM_ERR_PTR(-EBUSY);
+diff -ruN linux-5.18.orig/drivers/virtio/virtio_pci_modern.c linux-5.18/drivers/virtio/virtio_pci_modern.c
+--- linux-5.18.orig/drivers/virtio/virtio_pci_modern.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/virtio/virtio_pci_modern.c	2022-12-12 16:18:29.872080195 +0400
+@@ -363,7 +363,7 @@
+ 
+ 	if (!virtio_pci_find_shm_cap(pci_dev, id, &bar, &offset, &len))
+ 		return false;
+-
++	dump_stack();
+ 	phys_addr = pci_resource_start(pci_dev, bar);
+ 	bar_len = pci_resource_len(pci_dev, bar);
+ 
+diff -ruN linux-5.18.orig/drivers/virtio/virtio_pci_modern_dev.c linux-5.18/drivers/virtio/virtio_pci_modern_dev.c
+--- linux-5.18.orig/drivers/virtio/virtio_pci_modern_dev.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/drivers/virtio/virtio_pci_modern_dev.c	2022-12-12 16:18:53.280497126 +0400
+@@ -90,6 +90,7 @@
+ 		return NULL;
+ 	}
+ 
++	dump_stack();
+ 	p = pci_iomap_range(dev, bar, offset, length);
+ 	if (!p)
+ 		dev_err(&dev->dev,
+diff -ruN linux-5.18.orig/mm/memory.c linux-5.18/mm/memory.c
+--- linux-5.18.orig/mm/memory.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/mm/memory.c	2022-12-14 15:15:45.166218472 +0400
+@@ -622,7 +622,7 @@
+ 			return NULL;
+ 		if (pte_devmap(pte))
+ 			return NULL;
+-
++		printk("------------------- CONFIG_ARCH_HAS_PTE_SPECIAL");
+ 		print_bad_pte(vma, addr, pte, NULL);
+ 		return NULL;
+ 	}
+@@ -649,6 +649,7 @@
+ 
+ check_pfn:
+ 	if (unlikely(pfn > highest_memmap_pfn)) {
++		printk("--------------- check_pfn");
+ 		print_bad_pte(vma, addr, pte, NULL);
+ 		return NULL;
+ 	}
+@@ -1388,7 +1389,11 @@
+ 			rss[mm_counter(page)]--;
+ 			page_remove_rmap(page, vma, false);
+ 			if (unlikely(page_mapcount(page) < 0))
++			{
+ 				print_bad_pte(vma, addr, ptent, page);
++				printk("----------> page_mapcount");
++			}
++			
+ 			if (unlikely(__tlb_remove_page(tlb, page))) {
+ 				force_flush = 1;
+ 				addr += PAGE_SIZE;
+@@ -1413,7 +1418,10 @@
+ 				continue;
+ 			rss[MM_SWAPENTS]--;
+ 			if (unlikely(!free_swap_and_cache(entry)))
++			{
+ 				print_bad_pte(vma, addr, ptent, NULL);
++				printk("----------> free_swap_and_cache");
++			}
+ 		} else if (is_migration_entry(entry)) {
+ 			page = pfn_swap_entry_to_page(entry);
+ 			if (!should_zap_page(details, page))
+diff -ruN linux-5.18.orig/mm/memory_hotplug.c linux-5.18/mm/memory_hotplug.c
+--- linux-5.18.orig/mm/memory_hotplug.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/mm/memory_hotplug.c	2022-12-12 13:36:46.519451191 +0400
+@@ -1466,6 +1466,7 @@
+ int add_memory_driver_managed(int nid, u64 start, u64 size,
+ 			      const char *resource_name, mhp_t mhp_flags)
+ {
++	dump_stack();
+ 	struct resource *res;
+ 	int rc;
+ 
+diff -ruN linux-5.18.orig/mm/memremap.c linux-5.18/mm/memremap.c
+--- linux-5.18.orig/mm/memremap.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/mm/memremap.c	2022-12-13 12:26:29.121286918 +0400
+@@ -292,6 +292,7 @@
+ 	const int nr_range = pgmap->nr_range;
+ 	int error, i;
+ 
++	dump_stack();
+ 	if (WARN_ONCE(!nr_range, "nr_range must be specified\n"))
+ 		return ERR_PTR(-EINVAL);
+ 
+@@ -387,6 +388,7 @@
+ 	int error;
+ 	void *ret;
+ 
++	dump_stack();
+ 	ret = memremap_pages(pgmap, dev_to_node(dev));
+ 	if (IS_ERR(ret))
+ 		return ret;
+diff -ruN linux-5.18.orig/kernel/iomem.c linux-5.18/kernel/iomem.c
+--- linux-5.18.orig/kernel/iomem.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/kernel/iomem.c	2022-12-14 11:37:24.467420753 +0400
+@@ -141,6 +141,8 @@
+ {
+ 	void **ptr, *addr;
+ 
++	dump_stack();
++	printk("%s: Size=0x%x", __FUNCTION__, size);
+ 	ptr = devres_alloc_node(devm_memremap_release, sizeof(*ptr), GFP_KERNEL,
+ 			dev_to_node(dev));
+ 	if (!ptr)
+@@ -155,6 +157,7 @@
+ 		return ERR_PTR(-ENXIO);
+ 	}
+ 
++	printk("%s: addr=%pR", __FUNCTION__, addr);
+ 	return addr;
+ }
+ EXPORT_SYMBOL(devm_memremap);
+diff -ruN linux-5.18.orig/kernel/resource.c linux-5.18/kernel/resource.c
+--- linux-5.18.orig/kernel/resource.c	2022-05-22 23:52:31.000000000 +0400
++++ linux-5.18/kernel/resource.c	2022-12-14 11:01:58.144271309 +0400
+@@ -283,6 +283,7 @@
+ {
+ 	struct resource *conflict;
+ 
++	// dump_stack();
+ 	conflict = request_resource_conflict(root, new);
+ 	return conflict ? -EBUSY : 0;
+ }
+@@ -1567,6 +1568,9 @@
+ 	struct region_devres *dr = NULL;
+ 	struct resource *res;
+ 
++	// dump_stack();
++	// printk("__devm_request_region: ---- start=%pR n=%x name=%pR", start, n, name);
++
+ 	dr = devres_alloc(devm_region_release, sizeof(struct region_devres),
+ 			  GFP_KERNEL);
+ 	if (!dr)
+@@ -1577,6 +1581,7 @@
+ 	dr->n = n;
+ 
+ 	res = __request_region(parent, start, n, name, 0);
++	// printk("__devm_request_region: ---- res=%pR", res);
+ 	if (res)
+ 		devres_add(dev, dr);
+ 	else
