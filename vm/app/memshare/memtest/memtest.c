@@ -1,4 +1,3 @@
-#if 1
 #include <stdio.h>
 #include <linux/fs.h>
 #include <fcntl.h>
@@ -14,29 +13,32 @@
 #include <stdlib.h>
 
 #define PMEM_DEVICE "/dev/pmem_char"
-#define TEST_TYPE long int
+#define TEST_TYPE int
 #define TEST_TYPE_LENGTH sizeof(TEST_TYPE)
 #define MB (1048576)
 
 
-//#define IS_BLK 1
-
 int pmem_fd = -1; 
 void *pmem_ptr;
 long int pmem_size;
+volatile void *test_pmem;
+long test_mem_size = 0;
 
 struct
 {
-  volatile int filler[137];
   volatile int ready;
   volatile int start;
+  volatile int data;
   volatile int done;
   volatile int shutdown;
 } volatile *vm_control;
 
 int is_netvm()
 {
-  FILE* test_file = fopen("/etc/nftables.conf", "r"); // This file exists only on the netvm virtual machine
+  /* This file exists only on the netvm virtual machine. Use its
+   *  presense to detect which machine wwe are running on
+   */
+  FILE* test_file = fopen("/etc/nftables.conf", "r"); 
 
   int first = test_file != NULL;
   if (first)
@@ -47,8 +49,6 @@ int is_netvm()
 
 void hexdump(volatile void *mem, int size)
 {
-  mem += sizeof(vm_control->filler);
-  size -= sizeof(vm_control->filler);
   for(int i = 0; i < size; i++)
   {
     printf("%02x ", *(unsigned char*) (mem + i));
@@ -68,81 +68,9 @@ void print_report(double cpu_time_s, double real_time_s, long int data_written, 
     (double)(data_read+data_written)/MB/real_time_s);
 }
 
-void flush()
-{
-  return;
-  __builtin___clear_cache((void*)pmem_ptr, (void*)pmem_ptr+pmem_size);
-  // printf("flush\n");
-  int res;
-  #ifdef IS_BLK
-  res = ioctl(pmem_fd, BLKFLSBUF);
-  if (res < 0)
-  {
-    perror("ioctl");
-  }
-  #endif
-  // system("echo 1 > /proc/sys/vm/drop_caches");
-  // res = fflush(pmem_fd);
-  // if (res < 0)
-  // {
-  //   perror("fflush");
-  // }  
-  // res = fsync(pmem_fd);
-  // if (res < 0)
-  // {
-  //   perror("fsync");
-  // }
-
-  // res = msync((void*)pmem_ptr, pmem_size, MS_SYNC);
-  // if (res < 0)
-  // {
-  //   perror("msync");
-  // }  
-
-  __builtin___clear_cache((void*)pmem_ptr, (void*)pmem_ptr+pmem_size);
-  sync();
-
-  return;
-  res = munmap((void*)pmem_ptr, pmem_size);
-  if (res < 0)
-  {
-    perror("munmap "PMEM_DEVICE);
-  }
-  printf("Close\n");
-  close(pmem_fd);
-  pmem_fd = open(PMEM_DEVICE, O_RDWR|O_DIRECT);
-  if (pmem_fd < 0)
-  {
-    perror("open "PMEM_DEVICE);
-    exit(1);
-  }
-  #ifdef IS_BLK
-  res = ioctl(pmem_fd, BLKGETSIZE64, &pmem_size);
-  if (res < 0)
-  {
-    perror(PMEM_DEVICE);
-  }
-  res = ioctl(pmem_fd, BLKFLSBUF);
-  if (res < 0)
-  {
-    perror("ioctl");
-  }  
-  #endif
-  pmem_ptr = mmap(NULL, pmem_size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_NORESERVE|MAP_NONBLOCK, pmem_fd, 0);
-  if (pmem_ptr == MAP_FAILED)
-  {
-    perror("mmap");
-    exit(1);
-  }
-  __builtin___clear_cache((void*)pmem_ptr, (void*)pmem_ptr+pmem_size);
-}
-
 #define START (0x11111111) 
 #define READY (0x55555555)
 #define DONE  (0x99999999)
-
-//#define usleep(x) {};
-
 
 void proc_netvm()
 {
@@ -158,7 +86,6 @@ void proc_netvm()
     do
     {
       vm_control->ready = READY;
-      flush();
       usleep(10000);
     } while(!vm_control->start);
 
@@ -166,7 +93,6 @@ void proc_netvm()
     vm_control->start = 0;
     printf("Server: Setting done to 0\n");
     vm_control->done = 0;
-    flush();
 
     printf("Server: Start received.\n");
     printf("Server: "); hexdump(vm_control, sizeof(*vm_control));    
@@ -175,11 +101,9 @@ void proc_netvm()
     usleep(3000000); // 3 secs
 
     // Fill memory with a pattern
-
     printf("Server: Task finished. Ready (0) Done(%x) \n", DONE);
     vm_control->ready = 0;
     vm_control->done = DONE;
-    flush();
   } while(!vm_control->shutdown);
 }
 
@@ -189,7 +113,6 @@ void proc_test()
   {
     printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
     memset((void*)vm_control, 0, sizeof(*vm_control));
-    flush();
     printf("Client: &vm_control->ready=%p vm_control->ready=%x\n", &(vm_control->ready), (*vm_control).ready);
 
     // Wait for the peer VM be ready
@@ -197,9 +120,6 @@ void proc_test()
     do
     {
       usleep(1000);
-      flush();
-      // printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
-      // printf("Client: &vm_control->ready?=%p vm_control->ready?=%x\n", &(vm_control->ready), (*vm_control).ready);
     } while(!vm_control->ready);
     printf("Client: Ready (0).\n");
     vm_control->ready = 0;
@@ -207,8 +127,8 @@ void proc_test()
     // Start the partner VM
     printf("Client: Starting the server. Done (0) Start (%x)\n", START);
     vm_control->done = 0;
+    vm_control->data = rand();
     vm_control->start = START;
-    flush();
 
     printf("Client: Waiting for server completion.\n");
     printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
@@ -216,14 +136,14 @@ void proc_test()
     do 
     {
       usleep(1000); // 100ms
-      flush();
     } while(!vm_control->done);
 
     printf("Client: task done. Setting Done (0) Start (0)\n");
     vm_control->done = 0;
     vm_control->start = 0;
-    flush();
     printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
+
+
  
   } while(!vm_control->shutdown);
 }
@@ -303,9 +223,6 @@ int get_pmem_size()
 
 int main(int argc, char**argv )
 {
-  volatile void *test_pmem;
-  long test_mem_size = 0;
-
   /* Open shared memory */
   pmem_fd = open(PMEM_DEVICE, O_RDWR);
   if (pmem_fd < 0)
@@ -315,19 +232,10 @@ int main(int argc, char**argv )
   }  
 
   /* Get memory size */
-  int res;
   pmem_size = get_pmem_size();
-  if (pmem_size < 0)
-    goto exit_error;
 
   printf("pmem_size=%ld\n", pmem_size);
-  if (res < 0)
-  {
-    perror(PMEM_DEVICE);
-    goto exit_error;
-  }
-  
-  if (pmem_size == 0)
+  if (pmem_size <= 0)
   {
     printf("No shared memory detected.\n");
     goto exit_close; 
@@ -353,8 +261,7 @@ int main(int argc, char**argv )
 
     // memtest(test_pmem, test_mem_size, 0);
 
-    res = munmap((void*)pmem_ptr, pmem_size);
-    if (res < 0)
+    if (unmap((void*)pmem_ptr, pmem_size))
     {
       perror(PMEM_DEVICE);
       goto exit_error;
@@ -365,155 +272,9 @@ int main(int argc, char**argv )
     printf("Got NULL pointer from mmap.\n");
   }
 
-  close(pmem_fd);
-  return 0;
-
 exit_close:
   close(pmem_fd);
+
 exit_error:
   return 1;
 }
-#else
-/*
- * pcimem.c: Simple program to read/write from/to a pci device from userspace.
- *
- *  Copyright (C) 2010, Bill Farrow (bfarrow@beyondelectronics.us)
- *
- *  Based on the devmem2.c code
- *  Copyright (C) 2000, Jan-Derk Bakker (J.D.Bakker@its.tudelft.nl)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
- */
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <unistd.h>
-#include <string.h>
-#include <errno.h>
-#include <signal.h>
-#include <fcntl.h>
-#include <ctype.h>
-#include <termios.h>
-#include <sys/types.h>
-#include <sys/mman.h>
-#include <linux/pci.h>
-
-
-#define PRINT_ERROR \
-    do { \
-        fprintf(stderr, "Error at line %d, file %s (%d) [%s]\n", \
-        __LINE__, __FILE__, errno, strerror(errno)); exit(1); \
-    } while(0)
-
-#define MAP_SIZE 4096UL
-#define MAP_MASK (MAP_SIZE - 1)
-
-int main(int argc, char **argv) {
-    int fd; 
-    void *map_base, *virt_addr;
-    uint32_t read_result, writeval;
-    char *filename;
-    off_t target;
-    int access_type = 'w';
-
-    if(argc < 3) {
-        // pcimem /sys/bus/pci/devices/0001\:00\:07.0/resource0 0x100 w 0x00
-        // argv[0]  [1]                                         [2]   [3] [4]
-        fprintf(stderr, "\nUsage:\t%s { sys file } { offset } [ type [ data ] ]\n"
-                "\tsys file: sysfs file for the pci resource to act on\n"
-                "\toffset  : offset into pci memory region to act upon\n"
-                "\ttype    : access operation type : [b]yte, [h]alfword, [w]ord\n"
-                "\tdata    : data to be written\n\n",
-                argv[0]);
-        exit(1);
-    }   
-    filename = argv[1];
-    target = strtoul(argv[2], 0, 0); 
-
-    if(argc > 3)
-        access_type = tolower(argv[3][0]);
-
-    if((fd = open(filename, O_RDWR | O_SYNC)) == -1){
-        PRINT_ERROR;
-    }
-    printf("%s opened.\n", filename);
-    printf("Target offset is 0x%x, page size is %ld map mask is 0x%lX\n", (int) target, sysconf(_SC_PAGE_SIZE), MAP_MASK);
-    fflush(stdout);
-
-    /* Map one page */
-#if 0
-    //map_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t) (target & ~MAP_MASK));
-    //map_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~MAP_MASK);
-#endif
-    printf("mmap(%d, %ld, 0x%x, 0x%x, %d, 0x%x)\n", 0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (int) (target & ~MAP_MASK));
-    map_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (target & ~MAP_MASK));
-    if(map_base == (void *) -1){
-       printf("PCI Memory mapped ERROR.\n");
-        PRINT_ERROR;
-        close(fd);
-        return 1;
-    }
-
-    printf("mmap(%d, %ld, 0x%x, 0x%x, %d, 0x%x)\n", 0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (int) (target & ~MAP_MASK));
-    printf("PCI Memory mapped %ld byte region to map_base 0x%08lx.\n", MAP_SIZE, (unsigned long) map_base);
-    fflush(stdout);
-
-    virt_addr = map_base + (target & MAP_MASK);
-    printf("PCI Memory mapped access 0x %08X.\n", (uint32_t ) virt_addr);
-   switch(access_type) {
-        case 'b':
-                read_result = *((uint8_t *) virt_addr);
-                break;  
-        case 'h':
-                read_result = *((uint16_t *) virt_addr);
-                break;  
-        case 'w':
-                read_result = *((uint32_t *) virt_addr);
-                        printf("READ Value at offset 0x%X (%p): 0x%X\n", (int) target, virt_addr, read_result);
-                break;
-        default:
-                fprintf(stderr, "Illegal data type '%c'.\n", access_type);
-                exit(2);
-    }
-    fflush(stdout);
-
-    if(argc > 4) {
-        writeval = strtoul(argv[4], 0, 0);
-        switch(access_type) {
-                case 'b':
-                        *((uint8_t *) virt_addr) = writeval;
-                        read_result = *((uint8_t *) virt_addr);
-                        break;
-                case 'h':
-                        *((uint16_t *) virt_addr) = writeval;
-                        read_result = *((uint16_t *) virt_addr);
-                        break;
-                case 'w':
-                        *((uint32_t *) virt_addr) = writeval;
-                        read_result = *((uint32_t *) virt_addr);
-                        break;
-        }
-        printf("Written 0x%X; readback 0x%X\n", writeval, read_result);
-        fflush(stdout);
-    }
-
-    if(munmap(map_base, MAP_SIZE) == -1) { PRINT_ERROR;}
-    close(fd);
-    return 0;
-}
-///sys/devices/platform/30000000.pci/pci0000\:00/0000\:00:04.0
-#endif
