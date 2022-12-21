@@ -8,11 +8,12 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <sys/times.h>
+#include <sys/types.h>
 #include <sys/time.h>
 #include <string.h>
 #include <stdlib.h>
 
-#define PMEM_DEVICE "/dev/pmem0"
+#define PMEM_DEVICE "/dev/pmem_char"
 #define TEST_TYPE long int
 #define TEST_TYPE_LENGTH sizeof(TEST_TYPE)
 #define MB (1048576)
@@ -69,6 +70,7 @@ void print_report(double cpu_time_s, double real_time_s, long int data_written, 
 
 void flush()
 {
+  return;
   __builtin___clear_cache((void*)pmem_ptr, (void*)pmem_ptr+pmem_size);
   // printf("flush\n");
   int res;
@@ -285,6 +287,20 @@ int memtest(void *pmem_ptr, long int size, int verify)
   return ret_val;
 }
 
+int get_pmem_size()
+{
+    int res;
+
+    res = lseek(pmem_fd, 0 , SEEK_END);
+    if (res < 0) 
+    {
+      perror(PMEM_DEVICE);
+      return res;
+    }
+    lseek(pmem_fd, 0 , SEEK_SET);
+    return res;
+}
+
 int main(int argc, char**argv )
 {
   volatile void *test_pmem;
@@ -300,11 +316,9 @@ int main(int argc, char**argv )
 
   /* Get memory size */
   int res;
-  #if 0
-  res = ioctl(pmem_fd, BLKGETSIZE64, &pmem_size);
-  #else
-  pmem_size = 1*MB;
-  #endif
+  pmem_size = get_pmem_size();
+  if (pmem_size < 0)
+    goto exit_error;
 
   printf("pmem_size=%ld\n", pmem_size);
   if (res < 0)
