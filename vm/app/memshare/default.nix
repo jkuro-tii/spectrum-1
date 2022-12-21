@@ -52,7 +52,7 @@ let
     kernelPatches = [ {
         name = "Shared memory patch";
         patch = ./memshare.patch;
-     } ];  
+     } ];
     structuredExtraConfig = with lib.kernel; {
       EFI_STUB = yes;
       EFI = yes;

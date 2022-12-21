@@ -58,11 +58,10 @@ let
   '';
 
   kernel = pkgs.linux_latest.override {
-# TODO: jk: remove!!!
-#      kernelPatches = [ {
-#         name = "Shared memory patch";
-#         patch = ../../app/memshare/memshare.patch;
-#      } ];
+     kernelPatches = [ {
+        name = "Shared memory patch";
+        patch = ../../app/memshare/memshare.patch;
+     } ];
     structuredExtraConfig = with lib.kernel; {
       EFI_STUB = yes;
       EFI = yes;
@@ -74,7 +73,6 @@ let
       DRM_BOCHS = yes;
       DRM = yes;
       AGP = yes;
-      ARM64_PMEM = yes;
     };
   };
 
