@@ -10,56 +10,12 @@ index 264eb398f..ad90e4dcb 100644
  obj-$(CONFIG_MSPEC)		+= mspec.o
  obj-$(CONFIG_UV_MMTIMER)	+= uv_mmtimer.o
  obj-$(CONFIG_IBM_BSR)		+= bsr.o
-diff --git a/drivers/char/mem.c b/drivers/char/mem.c
-index cc296f082..7f7a96fed 100644
---- a/drivers/char/mem.c
-+++ b/drivers/char/mem.c
-@@ -359,7 +359,7 @@ static const struct vm_operations_struct mmap_mem_ops = {
- #endif
- };
- 
--static int mmap_mem(struct file *file, struct vm_area_struct *vma)
-+static int pmem_mmap(struct file *file, struct vm_area_struct *vma)
- {
- 	size_t size = vma->vm_end - vma->vm_start;
- 	phys_addr_t offset = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
-@@ -588,7 +588,7 @@ static loff_t null_lseek(struct file *file, loff_t offset, int orig)
-  * also note that seeking relative to the "end of file" isn't supported:
-  * it has no meaning, so it returns -EINVAL.
-  */
--static loff_t memory_lseek(struct file *file, loff_t offset, int orig)
-+static loff_t pmem_lseek(struct file *file, loff_t offset, int orig)
- {
- 	loff_t ret;
- 
-@@ -645,10 +645,10 @@ static int open_port(struct inode *inode, struct file *filp)
- #define open_mem	open_port
- 
- static const struct file_operations __maybe_unused mem_fops = {
--	.llseek		= memory_lseek,
-+	.llseek		= pmem_lseek,
- 	.read		= read_mem,
- 	.write		= write_mem,
--	.mmap		= mmap_mem,
-+	.mmap		= pmem_mmap,
- 	.open		= open_mem,
- #ifndef CONFIG_MMU
- 	.get_unmapped_area = get_unmapped_area_mem,
-@@ -666,7 +666,7 @@ static const struct file_operations null_fops = {
- };
- 
- static const struct file_operations __maybe_unused port_fops = {
--	.llseek		= memory_lseek,
-+	.llseek		= pmem_lseek,
- 	.read		= read_port,
- 	.write		= write_port,
- 	.open		= open_port,
 diff --git a/drivers/char/virtio_pmem_char.c b/drivers/char/virtio_pmem_char.c
 new file mode 100644
-index 000000000..91afb9050
+index 000000000..5c5bd3d3a
 --- /dev/null
 +++ b/drivers/char/virtio_pmem_char.c
-@@ -0,0 +1,261 @@
+@@ -0,0 +1,235 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * virtio_pmem.c: Virtio pmem char Driver
@@ -146,21 +102,14 @@ index 000000000..91afb9050
 +
 +	map_start_addr = vpmem->start + pos;
 +	pmem_addr = ioremap(map_start_addr, count);
-+	if (!pmem_addr) {
-+		pr_err("ioremap failed");
++	if (!pmem_addr)
 +		return -ENOMEM;
-+	}
 +	temp_buf = kmalloc(count, GFP_USER);
-+	if (!temp_buf) {
-+		pr_err("kmalloc failed");
++	if (!temp_buf)
 +		count = -ENOMEM;
 +		goto out;
-+	}
-+	pr_info("WW map_start_addr: %p pmem_addr: %p temp_buf: %p",
-+		map_start_addr, pmem_addr, temp_buf);
 +
 +	if (copy_from_user(temp_buf, buf, count)) {
-+		pr_err("copy_from_user failed");
 +		count = -EFAULT;
 +		goto out;
 +	}
@@ -190,23 +139,18 @@ index 000000000..91afb9050
 +	map_start_addr = vpmem->start + pos;
 +	pmem_addr = ioremap(map_start_addr, count);
 +	if (!pmem_addr) {
-+		pr_err("ioremap failed");
 +		return -ENOMEM;
 +	}
 +	temp_buf = kmalloc(count, GFP_USER);
 +	if (!temp_buf)
 +	{
-+		pr_err("kmalloc failed");
 +		count = -ENOMEM;
 +		goto out;
 +	}
-+	pr_info("RR map_start_addr: %p pmem_addr: %p temp_buf: %p",
-+		map_start_addr, pmem_addr, temp_buf);
 +
 +	memcpy_fromio(temp_buf, pmem_addr, count);
 +
 +	if (copy_to_user(buf, temp_buf, count)) {
-+		pr_info("copy_to_user failed");
 +		count = -EFAULT;
 +		goto out;
 +	}
@@ -222,23 +166,9 @@ index 000000000..91afb9050
 +
 +static int pmem_mmap(struct file *file, struct vm_area_struct *vma)
 +{
-+	pr_info("JK: %s", __FUNCTION__);
-+	printk(">>vpmem->start=0x%llx vpmem->size=0x%llx", vpmem->start,
-+	       vpmem->size);
-+
-+	pr_info(">>phys_mem_access_prot=0x%x",
-+		phys_mem_access_prot(file, vma->vm_pgoff, vpmem->size,
-+				     vma->vm_page_prot));
-+
-+	pr_info(">>pgprot_noncached=0x%x", pgprot_noncached(vma->vm_page_prot));
-+
-+	pr_info(">>vma->vm_flags=0x%lx", vma->vm_flags);
-+	pr_info(">>added flags: vma->vm_flags=0x%x", vma->vm_flags);
-+	if (vm_iomap_memory(vma, vpmem->start, vpmem->size) < 0) {
-+		pr_err("could not map the address area\n");
++	if (vm_iomap_memory(vma, vpmem->start, vpmem->size) < 0)
 +		return -EIO;
-+	}
-+	pr_info(">>vma flags: vma->vm_flags=0x%lx", vma->vm_flags);
++
 +	vma->vm_flags = VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP |
 +			VM_MIXEDMAP | VM_READ | VM_WRITE;
 +
@@ -418,45 +348,3 @@ index b5adf6abd..f122fb846 100644
  config VIRTIO_BALLOON
  	tristate "Virtio balloon driver"
  	depends on VIRTIO
-diff --git a/include/linux/mm.h b/include/linux/mm.h
-index 9f44254af..16f5fec27 100644
---- a/include/linux/mm.h
-+++ b/include/linux/mm.h
-@@ -2897,12 +2897,12 @@ static inline vm_fault_t vmf_insert_page(struct vm_area_struct *vma,
- 
- 	return VM_FAULT_NOPAGE;
- }
--
- #ifndef io_remap_pfn_range
- static inline int io_remap_pfn_range(struct vm_area_struct *vma,
- 				     unsigned long addr, unsigned long pfn,
- 				     unsigned long size, pgprot_t prot)
- {
-+	dump_stack();
- 	return remap_pfn_range(vma, addr, pfn, size, pgprot_decrypted(prot));
- }
- #endif
-diff --git a/mm/memory.c b/mm/memory.c
-index 76e3af963..81df3e5d6 100644
---- a/mm/memory.c
-+++ b/mm/memory.c
-@@ -2456,6 +2456,7 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
- {
- 	int err;
- 
-+	dump_stack();
- 	err = track_pfn_remap(vma, &prot, pfn, addr, PAGE_ALIGN(size));
- 	if (err)
- 		return -EINVAL;
-diff --git a/mm/page_alloc.c b/mm/page_alloc.c
-index 0e4203838..911350983 100644
---- a/mm/page_alloc.c
-+++ b/mm/page_alloc.c
-@@ -6687,6 +6687,7 @@ void __ref memmap_init_zone_device(struct zone *zone,
- 	unsigned long start = jiffies;
- 	int nid = pgdat->node_id;
- 
-+	dump_stack();
- 	if (WARN_ON_ONCE(!pgmap || zone_idx(zone) != ZONE_DEVICE))
- 		return;
- 

@@ -13,16 +13,21 @@
 #include <stdlib.h>
 
 #define PMEM_DEVICE "/dev/pmem_char"
-#define TEST_TYPE int
-#define TEST_TYPE_LENGTH sizeof(TEST_TYPE)
-#define MB (1048576)
 
+#define MB (1048576)
+#define START (0x11111111) 
+#define READY (0x55555555)
+#define DONE  (0x99999999)
+#define TEST_LOOPS (500)
 
 int pmem_fd = -1; 
 void *pmem_ptr;
 long int pmem_size;
-volatile void *test_pmem;
+volatile int *test_pmem;
 long test_mem_size = 0;
+static int memtest(unsigned int data, int verify);
+clock_t cpu_test_time_start;
+double real_time_start_msec;
 
 struct
 {
@@ -33,10 +38,24 @@ struct
   volatile int shutdown;
 } volatile *vm_control;
 
+int get_pmem_size()
+{
+    int res;
+
+    res = lseek(pmem_fd, 0 , SEEK_END);
+    if (res < 0) 
+    {
+      perror(PMEM_DEVICE);
+      return res;
+    }
+    lseek(pmem_fd, 0 , SEEK_SET);
+    return res;
+}
+
 int is_netvm()
 {
   /* This file exists only on the netvm virtual machine. Use its
-   *  presense to detect which machine wwe are running on
+   *  presence to detect which machine wwe are running on
    */
   FILE* test_file = fopen("/etc/nftables.conf", "r"); 
 
@@ -68,130 +87,94 @@ void print_report(double cpu_time_s, double real_time_s, long int data_written, 
     (double)(data_read+data_written)/MB/real_time_s);
 }
 
-#define START (0x11111111) 
-#define READY (0x55555555)
-#define DONE  (0x99999999)
-
 void proc_netvm()
 {
-  printf("Server: "); hexdump(vm_control, sizeof(*vm_control));
-  //memset(vm_control, 0, sizeof(*vm_control));
   do
   {
-    printf("Server: &vm_control->ready=%p\n", &(vm_control->ready));
     // Wait for start
-    printf("Server: Ready (%x). Waiting to be started.\n", READY);
-    vm_control->ready = READY;
-    printf("Server: "); hexdump(vm_control, sizeof(*vm_control));
+    printf("Server: Ready.\n");
     do
     {
       vm_control->ready = READY;
       usleep(10000);
     } while(!vm_control->start);
-
-    // test todo
     vm_control->start = 0;
-    printf("Server: Setting done to 0\n");
-    vm_control->done = 0;
 
+    // Start received, fill shared memory with random data 
     printf("Server: Start received.\n");
-    printf("Server: "); hexdump(vm_control, sizeof(*vm_control));    
+    memtest(vm_control->data, 0);
 
-    printf("Server: Executing a task.\n");
-    usleep(3000000); // 3 secs
-
-    // Fill memory with a pattern
-    printf("Server: Task finished. Ready (0) Done(%x) \n", DONE);
-    vm_control->ready = 0;
+    // Signal that task has been finished
+    printf("Server: Task has been finished.\n");
     vm_control->done = DONE;
+
   } while(!vm_control->shutdown);
 }
 
 void proc_test()
 {
+  memset((void*)vm_control, 0, sizeof(*vm_control));
   do
   {
-    printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
-    memset((void*)vm_control, 0, sizeof(*vm_control));
-    printf("Client: &vm_control->ready=%p vm_control->ready=%x\n", &(vm_control->ready), (*vm_control).ready);
-
     // Wait for the peer VM be ready
     printf("Client: Waiting for the server to be ready.\n");
     do
     {
       usleep(1000);
     } while(!vm_control->ready);
-    printf("Client: Ready (0).\n");
     vm_control->ready = 0;
 
-    // Start the partner VM
-    printf("Client: Starting the server. Done (0) Start (%x)\n", START);
+    printf("Client: Starting the server.\n");
     vm_control->done = 0;
     vm_control->data = rand();
     vm_control->start = START;
 
-    printf("Client: Waiting for server completion.\n");
-    printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
     // Wait for completion
     do 
     {
-      usleep(1000); // 100ms
+      usleep(1000); // 1ms
     } while(!vm_control->done);
-
-    printf("Client: task done. Setting Done (0) Start (0)\n");
     vm_control->done = 0;
-    vm_control->start = 0;
-    printf("Client: "); hexdump(vm_control, sizeof(*vm_control));
+    printf("Client: task done. Veryfying.\n");
 
+    memtest(vm_control->data, 1);
 
- 
   } while(!vm_control->shutdown);
 }
 
 
-int memtest(void *pmem_ptr, long int size, int verify)
+int memtest(unsigned int data, int verify)
 {
-  long int read_counter = 0, write_counter = 0;
+  static long int read_counter = 0, write_counter = 0;
   int ret_val = 0;
-
-  double cpu_time_ms = 0.0;
-  clock_t cpu_time_start = clock();
-
-  struct timeval time_start;
-  gettimeofday(&time_start, NULL);
-  double time_start_msec = 1000.0*time_start.tv_sec + (double)time_start.tv_usec/1000.0;
   struct timeval current_time;
-  double current_time_ms;
-
-  unsigned TEST_TYPE* pmem_array = (unsigned TEST_TYPE*) pmem_ptr;
-  long int pmem_size = size / sizeof(TEST_TYPE);
-  unsigned int counter;
-
-  printf("Shared array size: %ld bytes  size=%ld. Mapped at: %p is netvm=%d\n", pmem_size, size, pmem_ptr, is_netvm());
+  static double cpu_time_ms = 0.0;
+  double real_time_ms;
 
   if(!verify) 
   {
-    for(counter = 0; counter < 5000; counter++)
+    for(int i = 0; i < TEST_LOOPS; i++)
     {
-      for(unsigned int n = 0; n < pmem_size; n++) // TODO +2 instead of +1 
+      for(int n = 0; n < test_mem_size; n++)
       {
         write_counter++;
-        pmem_array[n] = counter;
+        test_pmem[n] = (n ^ data);
       }
     }
-    ret_val = 0;
   } 
   else
   {
     ret_val = 0;
-    for(counter = 0; counter < 50000; counter++)
+    for(int i = 0; i < TEST_LOOPS; i++)
     {
-      for(unsigned int n = 0; n < pmem_size; n++) // TODO +2 instead of +1 
-      {        
-        if (pmem_array[n] != counter) 
+      for(unsigned int n = 0; n < test_mem_size; n++)
+      {   
+        if (test_pmem[n] != (n ^ data)) 
         {
-          printf("memtest error at addr %p\n", &pmem_array[n]);
+          printf("-----------> memtest error at addr %p %d 0x%x 0x%x \n", &test_pmem[n],
+            n, test_pmem[n], (n ^ data));
           ret_val = 1;
+          vm_control->shutdown = 1;
           goto exit;
         }
         read_counter++;
@@ -200,29 +183,20 @@ int memtest(void *pmem_ptr, long int size, int verify)
   }
 
   exit:
+    printf("read_counter=%ld write_counter=%ld\n", read_counter, write_counter);
+
+    cpu_time_ms = (double)(clock() - cpu_test_time_start) / CLOCKS_PER_SEC * 1000;
     gettimeofday(&current_time, NULL);
-    cpu_time_ms = (double)(clock() - cpu_time_start) / CLOCKS_PER_SEC * 1000;
-    current_time_ms = 1000.0*current_time.tv_sec + (double)current_time.tv_usec/1000.0 - time_start_msec;
-    print_report(cpu_time_ms, current_time_ms, write_counter*sizeof(TEST_TYPE), read_counter*sizeof(TEST_TYPE));
+    real_time_ms = 1000.0*current_time.tv_sec + (double)current_time.tv_usec/1000.0 - real_time_start_msec;
+
+    print_report(cpu_time_ms, real_time_ms, write_counter*sizeof(int), read_counter*sizeof(int));
   return ret_val;
-}
-
-int get_pmem_size()
-{
-    int res;
-
-    res = lseek(pmem_fd, 0 , SEEK_END);
-    if (res < 0) 
-    {
-      perror(PMEM_DEVICE);
-      return res;
-    }
-    lseek(pmem_fd, 0 , SEEK_SET);
-    return res;
 }
 
 int main(int argc, char**argv )
 {
+  struct timeval time_start;
+
   /* Open shared memory */
   pmem_fd = open(PMEM_DEVICE, O_RDWR);
   if (pmem_fd < 0)
@@ -231,45 +205,43 @@ int main(int argc, char**argv )
     goto exit_error;
   }  
 
-  /* Get memory size */
+  /* Get shared memory */
   pmem_size = get_pmem_size();
-
-  printf("pmem_size=%ld\n", pmem_size);
   if (pmem_size <= 0)
   {
     printf("No shared memory detected.\n");
     goto exit_close; 
   }
-
   pmem_ptr = mmap(NULL, pmem_size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_NORESERVE, pmem_fd, 0);
-  printf("pmem_size=%ld pmem=%p\n", pmem_size, pmem_ptr);
-
-  if (pmem_ptr != NULL)
+  if (!pmem_ptr)
   {
-    vm_control = pmem_ptr;
-    test_pmem = pmem_ptr + sizeof(*vm_control);
-    test_mem_size = pmem_size - sizeof(*vm_control);
+    printf("Got NULL pointer from mmap.\n");
+    goto exit_close;
+  }
+  printf("shared memory size=%ld addr=%p\n", pmem_size, pmem_ptr);
 
-    if (is_netvm() || argc > 1)
-    {
-      proc_netvm();
-    }
-    else
-    {
-      proc_test();
-    }
+  vm_control = pmem_ptr;
+  test_pmem = pmem_ptr + sizeof(*vm_control);
+  test_mem_size = (pmem_size - sizeof(*vm_control)) / sizeof(int);
+  test_mem_size &= ~(sizeof(int) - 1);
 
-    // memtest(test_pmem, test_mem_size, 0);
+  cpu_test_time_start = clock();
+  gettimeofday(&time_start, NULL);
+  real_time_start_msec = 1000.0*time_start.tv_sec + (double)time_start.tv_usec/1000.0;
 
-    if (unmap((void*)pmem_ptr, pmem_size))
-    {
-      perror(PMEM_DEVICE);
-      goto exit_error;
-    }
+  if (is_netvm() || argc > 1)
+  {
+    proc_netvm();
   }
   else
   {
-    printf("Got NULL pointer from mmap.\n");
+    proc_test();
+  }
+
+  if (munmap((void*)pmem_ptr, pmem_size))
+  {
+    perror(PMEM_DEVICE);
+    goto exit_error;
   }
 
 exit_close:
