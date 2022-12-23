@@ -52,9 +52,9 @@ int get_pmem_size()
     return res;
 }
 
-int is_netvm()
+int is_server()
 {
-  /* This file exists only on the netvm virtual machine. Use its
+  /* This file exists only on the server virtual machine. Use its
    *  presence to detect which machine wwe are running on
    */
   FILE* test_file = fopen("/etc/nftables.conf", "r"); 
@@ -87,7 +87,7 @@ void print_report(double cpu_time_s, double real_time_s, long int data_written, 
     (double)(data_read+data_written)/MB/real_time_s);
 }
 
-void proc_netvm()
+void proc_server()
 {
   do
   {
@@ -111,7 +111,7 @@ void proc_netvm()
   } while(!vm_control->shutdown);
 }
 
-void proc_test()
+void proc_client()
 {
   memset((void*)vm_control, 0, sizeof(*vm_control));
   do
@@ -135,7 +135,7 @@ void proc_test()
       usleep(1000); // 1ms
     } while(!vm_control->done);
     vm_control->done = 0;
-    printf("Client: task done. Veryfying.\n");
+    printf("Client: task done. Verifying.\n");
 
     memtest(vm_control->data, 1);
 
@@ -220,22 +220,24 @@ int main(int argc, char**argv )
   }
   printf("shared memory size=%ld addr=%p\n", pmem_size, pmem_ptr);
 
+  /* Initialise memory area being tested */
   vm_control = pmem_ptr;
   test_pmem = pmem_ptr + sizeof(*vm_control);
   test_mem_size = (pmem_size - sizeof(*vm_control)) / sizeof(int);
   test_mem_size &= ~(sizeof(int) - 1);
 
+  /* Initialise time stuff */
   cpu_test_time_start = clock();
   gettimeofday(&time_start, NULL);
   real_time_start_msec = 1000.0*time_start.tv_sec + (double)time_start.tv_usec/1000.0;
 
-  if (is_netvm() || argc > 1)
+  if (is_server() || argc > 1)
   {
-    proc_netvm();
+    proc_server();
   }
   else
   {
-    proc_test();
+    proc_client();
   }
 
   if (munmap((void*)pmem_ptr, pmem_size))
